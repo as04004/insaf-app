@@ -980,16 +980,16 @@ export default function App() {
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         <ExcelHeader title="বিনিয়োগ তালিকা" societyInfo={societyInfo} />
         
-        <div className="grid grid-cols-3 gap-4 mb-6 bg-emerald-50 p-4 rounded-xl border border-emerald-100">
-          <div className="text-center">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6 bg-emerald-50 p-4 rounded-xl border border-emerald-100 divide-y sm:divide-y-0 sm:divide-x divide-emerald-200">
+          <div className="text-center py-2 sm:py-0">
             <p className="text-xs text-emerald-600 font-bold uppercase">মোট বিনিয়োগ সংখ্যা</p>
             <p className="text-xl font-bold text-emerald-800">{toBengaliNumber(loans.length)}</p>
           </div>
-          <div className="text-center border-x border-emerald-200">
+          <div className="text-center py-2 sm:py-0">
             <p className="text-xs text-emerald-600 font-bold uppercase">মোট বিনিয়োগ পরিমাণ</p>
             <p className="text-xl font-bold text-emerald-800">{formatCurrency(loans.reduce((acc, l) => acc + l.amount, 0))}</p>
           </div>
-          <div className="text-center">
+          <div className="text-center py-2 sm:py-0">
             <p className="text-xs text-emerald-600 font-bold uppercase">মুনাফাসহ মোট</p>
             <p className="text-xl font-bold text-emerald-800">{formatCurrency(loans.reduce((acc, l) => acc + l.total_with_profit, 0))}</p>
           </div>
@@ -1280,7 +1280,7 @@ export default function App() {
                       <span className="font-bold text-blue-700">{formatCurrency(selectedReport.new_account_income)}</span>
                     </div>
                     <div className="flex justify-between items-center py-2 border-b border-blue-100 last:border-0">
-                      <span className="text-gray-600">ঋণ প্রোফাইল ফরম বিক্রয়</span>
+                      <span className="text-gray-600">ঋণ খেলাপি জরিমানা</span>
                       <span className="font-bold text-blue-700">{formatCurrency(selectedReport.loan_profile_sale)}</span>
                     </div>
                     <div className="flex justify-between items-center py-2 border-b border-blue-100 last:border-0">
@@ -1291,9 +1291,17 @@ export default function App() {
                       <span className="text-gray-600">অফিস ঋণ গ্রহণ</span>
                       <span className="font-bold text-blue-700">{formatCurrency(selectedReport.office_loan_received)}</span>
                     </div>
-                    <div className="flex justify-between items-center py-2 border-b border-blue-100 last:border-0">
-                      <span className="text-gray-600 font-bold">ব্যাংক উত্তোলন</span>
-                      <span className="font-bold text-blue-700">{formatCurrency(selectedReport.bank_withdrawal)}</span>
+                    <div className="flex justify-between items-center py-2 mt-2 border-t-2 border-blue-200">
+                      <span className="text-blue-900 font-bold">মোট আদায়</span>
+                      <span className="font-bold text-blue-900">{formatCurrency(
+                        Number(selectedReport.total_installment_coll) + 
+                        Number(selectedReport.total_savings_coll) + 
+                        Number(selectedReport.service_charge_coll) + 
+                        Number(selectedReport.new_account_income) + 
+                        Number(selectedReport.loan_profile_sale) + 
+                        Number(selectedReport.director_deposit) + 
+                        Number(selectedReport.office_loan_received)
+                      )}</span>
                     </div>
                   </div>
                 </div>
@@ -1325,9 +1333,30 @@ export default function App() {
                       <span className="text-gray-600">অফিস ঋণ পরিশোধ</span>
                       <span className="font-bold text-red-700">{formatCurrency(selectedReport.office_loan_repayment)}</span>
                     </div>
-                    <div className="flex justify-between items-center py-2 border-b border-red-100 last:border-0">
-                      <span className="text-gray-600 font-bold">ব্যাংক জমা</span>
-                      <span className="font-bold text-red-700">{formatCurrency(selectedReport.bank_deposit)}</span>
+                    <div className="flex justify-between items-center py-2 mt-2 border-t-2 border-red-200">
+                      <span className="text-red-900 font-bold">মোট ব্যয়</span>
+                      <span className="font-bold text-red-900">{formatCurrency(
+                        Number(selectedReport.new_investment_pay) + 
+                        Number(selectedReport.general_savings_pay) + 
+                        Number(selectedReport.dps_pay) + 
+                        Number(selectedReport.general_expense) + 
+                        Number(selectedReport.director_withdrawal) + 
+                        Number(selectedReport.office_loan_repayment)
+                      )}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-amber-50 p-6 rounded-2xl border border-amber-100">
+                  <h4 className="font-bold text-amber-800 border-b border-amber-200 pb-2 mb-4">ব্যাংক লেনদেন</h4>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center py-2 border-b border-amber-100 last:border-0">
+                      <span className="text-gray-600">ব্যাংক জমা</span>
+                      <span className="font-bold text-amber-700">{formatCurrency(selectedReport.bank_deposit)}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-2 border-b border-amber-100 last:border-0">
+                      <span className="text-gray-600">ব্যাংক উত্তোলন</span>
+                      <span className="font-bold text-amber-700">{formatCurrency(selectedReport.bank_withdrawal)}</span>
                     </div>
                   </div>
                 </div>
@@ -1470,7 +1499,7 @@ export default function App() {
             <CurrencyInput name="total_savings_coll" defaultValue={editingReport?.total_savings_coll} label="মোট সঞ্চয় আদায়" />
             <CurrencyInput name="service_charge_coll" defaultValue={editingReport?.service_charge_coll} label="সার্ভিস চার্জ আদায়" />
             <CurrencyInput name="new_account_income" defaultValue={editingReport?.new_account_income} label="নতুন একাউন্ট খোলা বাবদ আয়" />
-            <CurrencyInput name="loan_profile_sale" defaultValue={editingReport?.loan_profile_sale} label="ঋণ প্রোফাইল ফরম বিক্রয়" />
+            <CurrencyInput name="loan_profile_sale" defaultValue={editingReport?.loan_profile_sale} label="ঋণ খেলাপি জরিমানা" />
             <CurrencyInput name="director_deposit" defaultValue={editingReport?.director_deposit} label="পরিচালকদের জমা" />
             <CurrencyInput name="office_loan_received" defaultValue={editingReport?.office_loan_received} label="অফিস ঋণ গ্রহণ" />
           </div>
