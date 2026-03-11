@@ -20,6 +20,7 @@ import {
   Filter
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import * as XLSX from 'xlsx';
 import { 
   collection, 
   addDoc, 
@@ -33,7 +34,8 @@ import {
   setDoc, 
   getDoc,
   onSnapshot,
-  Timestamp
+  Timestamp,
+  serverTimestamp
 } from 'firebase/firestore';
 import { db } from './firebase';
 
@@ -66,12 +68,43 @@ interface Saving {
   created_at: any;
 }
 
+interface Report {
+  id: string;
+  month: string;
+  year: string;
+  prev_month_cash: number;
+  prev_month_bank: number;
+  total_installment_coll: number;
+  total_savings_coll: number;
+  service_charge_coll: number;
+  new_account_income: number;
+  loan_profile_sale: number;
+  director_deposit: number;
+  office_loan_received: number;
+  new_investment_pay: number;
+  general_savings_pay: number;
+  dps_pay: number;
+  general_expense: number;
+  director_withdrawal: number;
+  office_loan_repayment: number;
+  bank_deposit: number;
+  bank_withdrawal: number;
+  created_at: any;
+}
+
+interface OutstandingBalance {
+  id: string;
+  amount: number;
+  date: string;
+  created_at: any;
+}
+
 interface Setting {
   admin_password?: string;
   logo_url?: string;
 }
 
-type View = 'home' | 'loans' | 'general_savings' | 'monthly_savings' | 'admin' | 'login';
+type View = 'home' | 'loans' | 'general_savings' | 'monthly_savings' | 'reports' | 'outstanding_list' | 'admin' | 'login';
 
 // --- Components ---
 
@@ -102,9 +135,12 @@ const StatCard = ({ label, value, icon: Icon, color }: { label: string, value: s
   </div>
 );
 
-  const Header = ({ societyInfo, logoUrl }: { societyInfo: any, logoUrl?: string }) => (
+  const Header = ({ societyInfo, logoUrl, onLogoClick }: { societyInfo: any, logoUrl?: string, onLogoClick: () => void }) => (
     <div className="mb-8 bg-white p-8 rounded-3xl shadow-sm border border-gray-100 flex flex-col md:flex-row items-center gap-6">
-      <div className={`${logoUrl ? '' : 'bg-emerald-600 p-2 shadow-lg'} rounded-3xl text-white overflow-hidden w-24 h-24 flex items-center justify-center`}>
+      <div 
+        onClick={onLogoClick}
+        className={`${logoUrl ? '' : 'bg-emerald-600 p-2 shadow-lg'} rounded-3xl text-white overflow-hidden w-24 h-24 flex items-center justify-center cursor-pointer hover:opacity-90 transition-opacity`}
+      >
         {logoUrl ? (
           <img src={logoUrl} alt="Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
         ) : (
@@ -134,7 +170,7 @@ const ExcelHeader = ({ title, societyInfo, subtitle }: { title: string, societyI
     <p className="text-gray-800 text-sm">{societyInfo.address}</p>
     <p className="text-gray-800 text-sm">স্থাপিত: {societyInfo.established}</p>
     <p className="text-emerald-700 text-sm font-bold">({societyInfo.shariah})</p>
-    <p className="text-gray-800 text-sm font-bold mt-1">{subtitle || societyInfo.updateDate}</p>
+    {subtitle && <p className="text-gray-800 text-sm font-bold mt-1">{subtitle}</p>}
     <h2 className="text-emerald-800 text-lg font-bold mt-2 underline decoration-emerald-800 underline-offset-4">{title}</h2>
   </div>
 );
@@ -146,23 +182,6 @@ const FilterBar = ({
   onFiltersChange: (updates: Partial<{ year: string, month: string, account_no: string, filterType: string }>) => void,
   filters: { year: string, month: string, account_no: string, filterType: string }
 }) => {
-  const years = Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - i).toString());
-  const months = [
-    { label: 'সব মাস', value: '' },
-    { label: 'জানুয়ারি', value: '01' },
-    { label: 'ফেব্রুয়ারি', value: '02' },
-    { label: 'মার্চ', value: '03' },
-    { label: 'এপ্রিল', value: '04' },
-    { label: 'মে', value: '05' },
-    { label: 'জুন', value: '06' },
-    { label: 'জুলাই', value: '07' },
-    { label: 'আগস্ট', value: '08' },
-    { label: 'সেপ্টেম্বর', value: '09' },
-    { label: 'অক্টোবর', value: '10' },
-    { label: 'নভেম্বর', value: '11' },
-    { label: 'ডিসেম্বর', value: '12' },
-  ];
-
   return (
     <div className="flex flex-wrap gap-4 mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
       <div className="flex-1 min-w-[150px]">
@@ -233,53 +252,164 @@ const FilterBar = ({
   );
 };
 
+const toBengaliNumber = (num: number | string) => {
+  const bengaliDigits = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+  return num.toString().replace(/\d/g, (d) => bengaliDigits[parseInt(d)]);
+};
+
+const toEnglishNumber = (str: string) => {
+  const bengaliDigits = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+  return str.replace(/[০-৯]/g, (d) => bengaliDigits.indexOf(d).toString());
+};
+
 const formatDate = (dateStr: string) => {
   if (!dateStr || !dateStr.includes('-')) return dateStr || '----------';
   const parts = dateStr.split('-');
   if (parts.length !== 3) return dateStr;
   const [year, month, day] = parts;
-  return `${day}-${month}-${year}`;
+  return toBengaliNumber(`${day}-${month}-${year}`);
 };
+
+const formatCurrency = (amount: number | string) => {
+  const num = Number(amount);
+  if (isNaN(num)) return toBengaliNumber('০');
+  const formatted = num.toLocaleString('en-IN');
+  return toBengaliNumber(formatted);
+};
+
+const CurrencyInput = ({ 
+  label, 
+  name, 
+  defaultValue, 
+  required = false 
+}: { 
+  label: string, 
+  name: string, 
+  defaultValue?: number | string, 
+  required?: boolean 
+}) => {
+  const [displayValue, setDisplayValue] = useState('');
+
+  useEffect(() => {
+    if (defaultValue !== undefined) {
+      setDisplayValue(formatCurrency(defaultValue));
+    }
+  }, [defaultValue]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawValue = toEnglishNumber(e.target.value).replace(/,/g, '');
+    if (rawValue === '' || /^\d*\.?\d*$/.test(rawValue)) {
+      setDisplayValue(rawValue === '' ? '' : formatCurrency(rawValue));
+    }
+  };
+
+  const hiddenValue = toEnglishNumber(displayValue).replace(/,/g, '');
+
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+      <input 
+        type="text" 
+        value={displayValue}
+        onChange={handleChange}
+        required={required}
+        className="w-full px-4 py-2 rounded-lg border border-gray-200 outline-none focus:ring-2 focus:ring-emerald-500"
+      />
+      <input type="hidden" name={name} value={hiddenValue} />
+    </div>
+  );
+};
+
+const startYear = 2023;
+const currentYear = new Date().getFullYear();
+const years = Array.from(
+  { length: currentYear - startYear + 1 },
+  (_, i) => (startYear + i).toString()
+);
+
+const months = [
+  { label: 'সব মাস', value: '' },
+  { label: 'জানুয়ারি', value: '01' },
+  { label: 'ফেব্রুয়ারি', value: '02' },
+  { label: 'মার্চ', value: '03' },
+  { label: 'এপ্রিল', value: '04' },
+  { label: 'মে', value: '05' },
+  { label: 'জুন', value: '06' },
+  { label: 'জুলাই', value: '07' },
+  { label: 'আগস্ট', value: '08' },
+  { label: 'সেপ্টেম্বর', value: '09' },
+  { label: 'অক্টোবর', value: '10' },
+  { label: 'নভেম্বর', value: '11' },
+  { label: 'ডিসেম্বর', value: '12' },
+];
 
 // --- Main App Component ---
 
 export default function App() {
   const [currentView, setCurrentView] = useState<View>('home');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [loans, setLoans] = useState<Loan[]>([]);
-  const [savings, setSavings] = useState<Saving[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isImporting, setIsImporting] = useState(false);
-  const [importProgress, setImportProgress] = useState(0);
+  const [loans, setLoans] = useState<Loan[]>(() => {
+    try {
+      const cached = localStorage.getItem('cached_loans');
+      return cached ? JSON.parse(cached) : [];
+    } catch { return []; }
+  });
+  const [savings, setSavings] = useState<Saving[]>(() => {
+    try {
+      const cached = localStorage.getItem('cached_savings');
+      return cached ? JSON.parse(cached) : [];
+    } catch { return []; }
+  });
+  const [reports, setReports] = useState<Report[]>([]);
+  const [outstandingBalances, setOutstandingBalances] = useState<OutstandingBalance[]>([]);
+  const [isLoading, setIsLoading] = useState(() => {
+    try {
+      const cachedSettings = localStorage.getItem('app_settings');
+      const cachedLoans = localStorage.getItem('cached_loans');
+      return !(cachedSettings || cachedLoans);
+    } catch { return true; }
+  });
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [adminPassword, setAdminPassword] = useState('');
-  const [settings, setSettings] = useState<Setting>({});
+  const [settings, setSettings] = useState<Setting>(() => {
+    try {
+      const cached = localStorage.getItem('app_settings');
+      return cached ? JSON.parse(cached) : {};
+    } catch { return {}; }
+  });
   const [showForm, setShowForm] = useState(false);
   const [editingLoan, setEditingLoan] = useState<Loan | null>(null);
   const [editingSaving, setEditingSaving] = useState<Saving | null>(null);
+  const [editingReport, setEditingReport] = useState<Report | null>(null);
+  const [editingOutstanding, setEditingOutstanding] = useState<OutstandingBalance | null>(null);
   const [filters, setFilters] = useState({ year: '', month: '', account_no: '', filterType: '' });
+  const [formKey, setFormKey] = useState(Date.now());
+  const [activeAdminTab, setActiveAdminTab] = useState<'loans' | 'general_savings' | 'monthly_savings' | 'reports' | 'outstanding' | 'settings'>('loans');
+  const [adminFormType, setAdminFormType] = useState<'loan' | 'general_saving' | 'monthly_saving' | 'report' | 'outstanding' | null>(null);
 
   const societyInfo = {
     name: "ইনসাফ সঞ্চয়-ঋণদান সমবায় সমিতি লিমিটেড",
-    address: "ডাকঘরঃ কয়ারিয়া, উপজেলাঃ কালকিনি, জেলাঃ মাদারীপুর।",
+    address: "ডাকঘরঃ কয়ারিয়া, উপজেলাঃ কালকিনি, জেলাঃ মাদারীপুর",
     established: "২০২১ ইং",
-    shariah: "ইসলামী শরীয়াহ মোতাবেক পরিচালিত",
-    updateDate: "০১/১২/২০২৩ থেকে প্রদানকৃত"
+    shariah: "ইসলামী শরীয়াহ মোতাবেক পরিচালিত"
   };
 
   useEffect(() => {
     const settingsRef = doc(db, 'settings', 'app_settings');
     const unsubscribe = onSnapshot(settingsRef, (snapshot) => {
       if (snapshot.exists()) {
-        setSettings(snapshot.data() as Setting);
+        const data = snapshot.data() as Setting;
+        setSettings(data);
+        localStorage.setItem('app_settings', JSON.stringify(data));
       } else {
         const defaultSettings = { admin_password: 'As@02920', logo_url: '' };
         setDoc(settingsRef, defaultSettings).catch(err => {
           console.error("Error initializing default settings:", err);
         });
         setSettings(defaultSettings);
+        localStorage.setItem('app_settings', JSON.stringify(defaultSettings));
       }
     }, (error) => {
       console.error("Error fetching settings:", error);
@@ -289,20 +419,142 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const dataViews: View[] = ['home', 'loans', 'general_savings', 'monthly_savings', 'admin'];
-    if (dataViews.includes(currentView)) {
-      if (currentView === 'admin' && !isLoggedIn) {
-        setIsLoading(false);
-        return;
-      }
-      fetchData();
-    } else {
+    const dataViews: View[] = ['home', 'loans', 'general_savings', 'monthly_savings', 'reports', 'admin'];
+    if (!dataViews.includes(currentView)) {
       setLoans([]);
       setSavings([]);
       setIsLoading(false);
+      return;
     }
-  }, [filters, currentView, isLoggedIn]);
 
+    if (currentView === 'admin' && !isLoggedIn) {
+      setIsLoading(false);
+      return;
+    }
+
+    // Only set loading to true if we don't have any data yet
+    if (loans.length === 0 && savings.length === 0 && reports.length === 0) {
+      setIsLoading(true);
+    }
+    setFetchError(null);
+
+    // --- Filter Logic for Loans ---
+    let loansQuery: any = null;
+    
+    // In admin view, if no filter is selected, show all. In public views, if no filter, show nothing.
+    const showAllByDefault = currentView === 'home' || (currentView === 'admin' && !filters.filterType);
+    
+    if (filters.filterType === 'all' || showAllByDefault) {
+      loansQuery = query(collection(db, 'loans'));
+    } else if (filters.filterType === 'account' && filters.account_no) {
+      loansQuery = query(collection(db, 'loans'), where('account_no', '==', filters.account_no.trim()));
+    } else if (filters.filterType === 'year' && filters.year) {
+      loansQuery = query(
+        collection(db, 'loans'), 
+        where('start_date', '>=', `${filters.year}-01-01`),
+        where('start_date', '<=', `${filters.year}-12-31`)
+      );
+    } else if (filters.filterType === 'month' && filters.year && filters.month) {
+      loansQuery = query(
+        collection(db, 'loans'), 
+        where('start_date', '>=', `${filters.year}-${filters.month}-01`),
+        where('start_date', '<=', `${filters.year}-${filters.month}-31`)
+      );
+    }
+
+    let unsubscribeLoans = () => {};
+    if (loansQuery) {
+      unsubscribeLoans = onSnapshot(loansQuery, (snapshot) => {
+        const loansData = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) } as Loan));
+        loansData.sort((a, b) => (a.start_date || '').localeCompare(b.start_date || ''));
+        setLoans(loansData);
+        if (currentView === 'home' || (currentView === 'admin' && !filters.filterType)) {
+          localStorage.setItem('cached_loans', JSON.stringify(loansData));
+        }
+        setIsLoading(false);
+      }, (error) => {
+        console.error("Error fetching loans:", error);
+        setFetchError("বিনিয়োগ তথ্য লোড করতে সমস্যা হয়েছে");
+        setIsLoading(false);
+      });
+    } else {
+      setLoans([]);
+      setIsLoading(false);
+    }
+
+    // --- Filter Logic for Savings ---
+    const isGeneral = currentView === 'general_savings' || (currentView === 'admin' && activeAdminTab === 'general_savings');
+    const isMonthly = currentView === 'monthly_savings' || (currentView === 'admin' && activeAdminTab === 'monthly_savings');
+    
+    let savingsQuery: any = null;
+    if (showAllByDefault || filters.filterType === 'all' || filters.filterType === 'account' || filters.filterType === 'year' || filters.filterType === 'month') {
+      savingsQuery = query(collection(db, 'savings'));
+    }
+
+    let unsubscribeSavings = () => {};
+    if (savingsQuery) {
+      unsubscribeSavings = onSnapshot(savingsQuery, (snapshot) => {
+        let savingsData = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) } as Saving));
+        
+        // Filter by type if applicable
+        if (isGeneral) savingsData = savingsData.filter(s => s.type === 'general');
+        else if (isMonthly) savingsData = savingsData.filter(s => s.type === 'monthly');
+
+        // Apply filters
+        if (filters.filterType === 'year' && filters.year) {
+          savingsData = savingsData.filter(s => s.date >= `${filters.year}-01-01` && s.date <= `${filters.year}-12-31`);
+        } else if (filters.filterType === 'month' && filters.year && filters.month) {
+          savingsData = savingsData.filter(s => s.date >= `${filters.year}-${filters.month}-01` && s.date <= `${filters.year}-${filters.month}-31`);
+        } else if (filters.filterType === 'account' && filters.account_no) {
+          savingsData = savingsData.filter(s => s.account_no === filters.account_no.trim());
+        } else if (filters.filterType === '' && ['loans', 'general_savings', 'monthly_savings'].includes(currentView)) {
+          // If "Select" is chosen in public views, show nothing
+          savingsData = [];
+        }
+
+        savingsData.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+        setSavings(savingsData);
+        if (currentView === 'home' || (currentView === 'admin' && !filters.filterType)) {
+          localStorage.setItem('cached_savings', JSON.stringify(savingsData));
+        }
+      }, (error) => {
+        console.error("Error fetching savings:", error);
+        setFetchError("সঞ্চয় তথ্য লোড করতে সমস্যা হয়েছে");
+      });
+    } else {
+      setSavings([]);
+    }
+
+    // --- Reports and Outstanding Balance ---
+    const reportsQuery = query(collection(db, 'reports'));
+    const unsubscribeReports = onSnapshot(reportsQuery, (snapshot) => {
+      const reportsData = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) } as Report));
+      // Sort client-side to avoid composite index requirement
+      reportsData.sort((a, b) => {
+        if (b.year !== a.year) return Number(b.year) - Number(a.year);
+        return Number(b.month) - Number(a.month);
+      });
+      setReports(reportsData);
+    });
+
+    const outstandingQuery = query(collection(db, 'outstanding_balance'), orderBy('date', 'desc'));
+    const unsubscribeOutstanding = onSnapshot(outstandingQuery, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as OutstandingBalance));
+      setOutstandingBalances(data);
+    });
+
+    return () => {
+      unsubscribeLoans();
+      unsubscribeSavings();
+      unsubscribeReports();
+      unsubscribeOutstanding();
+    };
+  }, [filters, currentView, isLoggedIn, activeAdminTab]);
+
+  const fetchData = async () => {
+    // fetchData is now handled by onSnapshot, but we keep the function signature 
+    // for compatibility with existing calls if any, though they won't do much.
+  };
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -340,86 +592,10 @@ export default function App() {
         alert('লোগো সফলভাবে আপলোড করা হয়েছে');
       } catch (error) {
         console.error("Error uploading logo:", error);
-        alert('লোগো আপলোড করতে সমস্যা হয়েছে। সম্ভবত ফাইলের সাইজ অনেক বড়।');
+        alert('লোগো আপলোড করতে সমস্যা হয়েছে সম্ভবত ফাইলের সাইজ অনেক বড়');
       }
     };
     reader.readAsDataURL(file);
-  };
-
-  const fetchData = async () => {
-    const isHome = currentView === 'home';
-    const isAdmin = currentView === 'admin';
-    const isLoans = currentView === 'loans';
-    const isGeneral = currentView === 'general_savings';
-    const isMonthly = currentView === 'monthly_savings';
-
-    setIsLoading(true);
-    setFetchError(null);
-
-    // Create a timeout promise
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error("সার্ভার থেকে তথ্য পেতে অনেক সময় লাগছে। দয়া করে আবার চেষ্টা করুন।")), 15000)
-    );
-
-    try {
-      const fetchAllData = async () => {
-        // --- Fetch Loans ---
-        let loansQuery = query(collection(db, 'loans'));
-        
-        if (filters.filterType === 'account' && filters.account_no) {
-          loansQuery = query(collection(db, 'loans'), where('account_no', '==', filters.account_no.trim()));
-        } else if (filters.filterType === 'year' && filters.year) {
-          loansQuery = query(
-            collection(db, 'loans'), 
-            where('start_date', '>=', `${filters.year}-01-01`),
-            where('start_date', '<=', `${filters.year}-12-31`)
-          );
-        } else if (filters.filterType === 'month' && filters.year && filters.month) {
-          loansQuery = query(
-            collection(db, 'loans'), 
-            where('start_date', '>=', `${filters.year}-${filters.month}-01`),
-            where('start_date', '<=', `${filters.year}-${filters.month}-31`)
-          );
-        }
-
-        const loansSnapshot = await getDocs(loansQuery);
-        let loansData = loansSnapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) } as Loan));
-        loansData.sort((a, b) => (a.start_date || '').localeCompare(b.start_date || ''));
-        setLoans(loansData);
-
-        // --- Fetch Savings ---
-        let savingsQuery = query(collection(db, 'savings'));
-        
-        if (isGeneral) {
-          savingsQuery = query(collection(db, 'savings'), where('type', '==', 'general'));
-        } else if (isMonthly) {
-          savingsQuery = query(collection(db, 'savings'), where('type', '==', 'monthly'));
-        }
-
-        const savingsSnapshot = await getDocs(savingsQuery);
-        let savingsData = savingsSnapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) } as Saving));
-        
-        if (filters.filterType === 'year' && filters.year) {
-          savingsData = savingsData.filter(s => s.date >= `${filters.year}-01-01` && s.date <= `${filters.year}-12-31`);
-        } else if (filters.filterType === 'month' && filters.year && filters.month) {
-          savingsData = savingsData.filter(s => s.date >= `${filters.year}-${filters.month}-01` && s.date <= `${filters.year}-${filters.month}-31`);
-        } else if (filters.filterType === 'account' && filters.account_no) {
-          savingsData = savingsData.filter(s => s.account_no === filters.account_no.trim());
-        }
-
-        savingsData.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-        setSavings(savingsData);
-      };
-
-      // Race between fetch and timeout
-      await Promise.race([fetchAllData(), timeoutPromise]);
-      
-    } catch (error: any) {
-      console.error("Error fetching data:", error);
-      setFetchError(error.message || "তথ্য লোড করতে সমস্যা হয়েছে। দয়া করে ইন্টারনেট কানেকশন চেক করুন।");
-    } finally {
-      setIsLoading(false);
-    }
   };
 
   const handleUpdateStatus = async (id: string, newStatus: string) => {
@@ -432,10 +608,9 @@ export default function App() {
         status: newStatus
       });
       alert('স্টাটাস সফলভাবে পরিবর্তন করা হয়েছে');
-      fetchData();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error updating status:", error);
-      alert('সার্ভারের সাথে যোগাযোগ করা যাচ্ছে না');
+      alert('স্টাটাস পরিবর্তন করতে সমস্যা হয়েছে: ' + (error.message || 'অজানা সমস্যা'));
     }
   };
 
@@ -444,25 +619,36 @@ export default function App() {
     const formData = new FormData(e.currentTarget);
     const data = Object.fromEntries(formData.entries());
     
+    const amount = parseFloat(data.amount as string);
+    const total_with_profit = parseFloat(data.total_with_profit as string);
+
+    if (isNaN(amount) || isNaN(total_with_profit)) {
+      alert('দয়া করে সঠিক সংখ্যা লিখুন');
+      return;
+    }
+    
     const loanData = {
       ...data,
-      amount: parseFloat(data.amount as string),
-      total_with_profit: parseFloat(data.total_with_profit as string),
+      amount,
+      total_with_profit,
       status: editingLoan ? editingLoan.status : 'চলমান',
-      created_at: editingLoan ? editingLoan.created_at : Timestamp.now()
+      updated_at: serverTimestamp(),
+      created_at: editingLoan ? editingLoan.created_at : serverTimestamp()
     };
     
     try {
       if (editingLoan) {
         await updateDoc(doc(db, 'loans', editingLoan.id), loanData);
+        alert('বিনিয়োগ সফলভাবে আপডেট করা হয়েছে');
       } else {
         await addDoc(collection(db, 'loans'), loanData);
+        alert('বিনিয়োগ সফলভাবে সংরক্ষণ করা হয়েছে');
       }
-      setShowForm(false);
       setEditingLoan(null);
-      fetchData();
-    } catch (error) {
+      setFormKey(Date.now());
+    } catch (error: any) {
       console.error("Error saving loan:", error);
+      alert('সংরক্ষণ করতে সমস্যা হয়েছে: ' + (error.message || 'অজানা সমস্যা'));
     }
   };
 
@@ -471,26 +657,37 @@ export default function App() {
     const formData = new FormData(e.currentTarget);
     const data = Object.fromEntries(formData.entries());
     
+    const amount = parseFloat(data.amount as string);
+    const profit = parseFloat(data.profit as string || '0');
+
+    if (isNaN(amount) || isNaN(profit)) {
+      alert('দয়া করে সঠিক সংখ্যা লিখুন');
+      return;
+    }
+    
     const savingData = {
       ...data,
       type,
-      amount: parseFloat(data.amount as string),
-      profit: parseFloat(data.profit as string || '0'),
+      amount,
+      profit,
       description: type === 'general' ? 'সাধারণ সঞ্চয়' : 'ডিপিএস',
-      created_at: editingSaving ? editingSaving.created_at : Timestamp.now()
+      updated_at: serverTimestamp(),
+      created_at: editingSaving ? editingSaving.created_at : serverTimestamp()
     };
     
     try {
       if (editingSaving) {
         await updateDoc(doc(db, 'savings', editingSaving.id), savingData);
+        alert('সঞ্চয় সফলভাবে আপডেট করা হয়েছে');
       } else {
         await addDoc(collection(db, 'savings'), savingData);
+        alert('সঞ্চয় সফলভাবে সংরক্ষণ করা হয়েছে');
       }
-      setShowForm(false);
       setEditingSaving(null);
-      fetchData();
-    } catch (error) {
+      setFormKey(Date.now());
+    } catch (error: any) {
       console.error("Error saving saving:", error);
+      alert('সংরক্ষণ করতে সমস্যা হয়েছে: ' + (error.message || 'অজানা সমস্যা'));
     }
   };
 
@@ -502,10 +699,10 @@ export default function App() {
     setDeletingId(id);
     try {
       await deleteDoc(doc(db, 'loans', id));
-      fetchData();
-    } catch (error) {
+      alert('সফলভাবে মুছে ফেলা হয়েছে');
+    } catch (error: any) {
       console.error("Error deleting loan:", error);
-      alert('সার্ভারের সাথে যোগাযোগ করা যাচ্ছে না');
+      alert('মুছে ফেলতে সমস্যা হয়েছে: ' + (error.message || 'অজানা সমস্যা'));
     } finally {
       setDeletingId(null);
     }
@@ -519,173 +716,253 @@ export default function App() {
     setDeletingId(id);
     try {
       await deleteDoc(doc(db, 'savings', id));
-      fetchData();
-    } catch (error) {
+      alert('সফলভাবে মুছে ফেলা হয়েছে');
+    } catch (error: any) {
       console.error("Error deleting saving:", error);
-      alert('সার্ভারের সাথে যোগাযোগ করা যাচ্ছে না');
+      alert('মুছে ফেলতে সমস্যা হয়েছে: ' + (error.message || 'অজানা সমস্যা'));
     } finally {
       setDeletingId(null);
     }
   };
 
-  const handleBulkImport = async () => {
-    const rawData = `মোঃ হেমায়েত বেপারী	122	----------	আতিকুর রহমান	----------	10000	11000	16-12-23	31-10-24
-মোঃ রিয়াজ হোসেন	219	০১৭৭৬৭৯০২৮	মোঃ জলিল বাগ	০১৭৬৫৬৩৩১০৩	35000	38500	08-01-24	24-11-24
-মোসাঃ মালা বেগম	209	০১৩০০৭৬৩০১১	মোঃ বেল্লাল হোসেন	০১৩০০৭৬৩০১১	10000	11220	05-01-24	16-11-24
-শুভ জন্দ্র	134	০১৭১৫১৯৮৯২৬	বিপুল চন্দ্র শিল	০১৭১৫১৯৮৯২৬	50000	56100	04-02-24	24-12-24
-রেবেকা আফরোজ	159	০১৭৬৬৪৩৩৯১২	মোঃ অহিদুজ্জামান	০১৭৬৬৪৩৩৯১২	50000	56100	24-02-24	11-01-25
-সেকেন্দার আলী সরদার	210	----------	মোঃ ফয়সাল সরদার	----------	10000	11220	24-02-24	11-01-25
-মোঃ রাব্বি	217				35000	38500		
-মোঃ ফজলুর রহমান	190	০১৭৯৫৬৯৩৫২২	-------	---	100000	110000	30-03-24	04-01-25
-অহিদুল ইসলাম	220	০১৩০২৮৯২৪৯৬	নেয়ামাতু্ল্ল	০১৭৬৮১৭৩৬৯৪	20000	22440	31-03-24	04-02-25
-মোঃ মাইনুল ইসলাম	200	০১৭১২২৫১১৮২	শামিম হোসাইন	০১৭১৫২১৮২৫২	50000	56100	05-04-24	08-02-25
-মোৎ সাকিব হোবাইন	54	০১৭২৯৭৭০০৯৬	এচাহাক ঘরামী	০১৬২৪৪৪৯৮৫১	15000	16830	15-04-24	11-03-25
-ইজাজুল করিম লিয়ন	221	০১৮৩৫৯৮৯৭৫৫	মোঃ রাব্বি	০১৩০০৫৯৪৫২২	30000	33660	27-04-24	23-03-25
-মোঃ সেলিম সিকদার	183	০১৩২৫-৪৫০৫৩৭	মোঃ হারুন সিকদার	০১৭১৮-৭৬৯৯৭৬	25000	28050	20-05-24	19-04-25
-মনির	222	০১৭৭২৪৮৩৬৯৩	শাওন ঘরামী	০১৩০১৫১৭৩৮৬	30000	33825	29-05-24	23-04-25
-বেলাল হোসেন	223	০১৭৬৮৭১৯৩৪১	মোঃ মাইনুদ্দিন ফকির	০১৯১১৪৭৭৬২৬	30000	33825	29-05-24	23-04-25
-বেল্লাল হোসেন	208	০১৭১৭২৬৮৩৯৬	মোঃ আলাউদ্দিন সিকদার	০১৭১৮৫১৩১৭১	50000	56100	06-06-24	24-05-25
-অহিদুল ইসলাম	220	০১৩০২৮৯২৪৯৬	নেয়ামাতু্ল্ল	০১৭৬৮১৭৩৬৯৪	30000	33660	15-06-24	15-05-25
-কাজী হাসিব	224	০১৭১০৬৭৫২৪১	কাজী খলিদ সাইফুল্লাহ	০১৭১২৭৪৯৫১৬	25000	28875	07-07-24	12-06-25
-মোঃ জুয়েল	225	০১৭৯০৩০১৭৩৮	মোসাঃ নাজমা বেগম	০১৭১৬২১৭৪২৪	10000	11000	17-07-24	30-12-24
-ফরিদ উদ্দিন সংগ্রাম আকন	88	০১৭২৪৫৫৬১৯৩	----------	----------	80000	88000	29-07-24	30-06-25
-শুভ জন্দ্র	134	০১৭১৫১৯৮৯২৬	বিপুল চন্দ্র শিল	০১৭১৫১৯৮৯২৬	50000	53000	06-08-24	30-12-24
-মোঃ কবির হাওলাদার	226	০১৩১৫৩২৫১০৯	----------	----------	20000	21200	28-08-24	30-12-24
-মোঃ ফারুক সরদার	76	০১৭৬৬৮১৮৪৭৬	মোসাঃ সাহিদা বেগম	০১৭৪০১৩৮৪৩০	25000	26496	05-09-24	30-12-24
-মোসাঃ মালা বেগম	209	----------	বেলাল হোসেন	----------	15000	15800	05-10-24	30-12-24
-মোঃ জুয়েল	225	০১৭৯০৩০১৭৩৮	মোসাঃ নাজমা বেগম	০১৭১৬২১৭৪২৪	20000	22500	06-01-25	25-09-25
-মোঃ ফারুক সরদার	76	০১৭৬৬৮১৮৪৭৬	মোসাঃ সাহিদা বেগম	০১৭৪০১৩৮৪৩০	50000	56980	06-01-25	10-11-25
-মোঃ নাজমুল হোসেন	193	০১৩১৭৭৫০৫৭৬	মোঃ ফজলুর রহমান	০১৭৭২১১০৫৮৪	30000	34100	13-01-25	09-12-25
-হাচানাত ফকির	9	০১৭০৬৬১৪১৫০	মোঃ ফজলুর রহমান	০১৭৭২১১০৫৮৪	50000	56760	15-01-25	29-11-25
-শুভ জন্দ্র	134	০১৭১৫১৯৮৯২৬	বিপুল চন্দ্র শিল	০১৭১৫১৯৮৯২৬	100000	112500	18-01-25	25-11-25
-মোঃ জাহিদ হোসাইন	227	০১৭৪১১০৬৪৫৬	মোঃ জাকির হোসেন	০১৭৫৬৩১৫১৩৬	30000	33900	26-02-25	26-01-26
-মোঃ হেমায়েত বেপারী	228	০১৭৩২৭৭৪১০৫	রিফাত বেপারী	০১৮৬৭০০৮৮৮৪	50000	56925	26-02-25	26-01-26
-মোঃ রবিউল ইসলাম	229	০১৮৬১০৮৯৮৮৫			50000	56925	02-03-25	17-01-26
-মোঃ ছানাউল হাওলাদার	230	০১৭৮১৫০০৬৯৯	নাজমা আক্তার	০১৭৫৩৪৪৪৩৭৭	20000	22600	18-03-25	17-03-25
-মোঃ শওকত হোসেন	79	০১৭৫৬৩১৫১৯৮	মোছাঃ হাওয়ারোন	০১৭৫৬৩১৫১৭৫	30000	33875	23-03-25	20-02-26
-মোঃ সেলিম সিকদার	183	০১৩২৫-৪৫০৫৩৭	মোঃ হারুন সিকদার	০১৭১৮-৭৬৯৯৭৬	25000	28320	10-05-25	10-04-26
-মোঃ জালাল সরদার	231	০১৭৬০-২২০৯২৪	মোঃ আলাউদ্দিন চোকদার		25000	28380	22-05-25	22-04-26
-মোঃ আলী সিকদার	58	০১৭৪৪-৮৯৩৩১৮			30000	33770	01-06-25	01-05-26
-সেকেন্দার আলী সরদার	210	----------	মোঃ ফয়সাল সরদার	----------	20000	22880	04-06-25	04-05-26
-মোঃ জুয়েল	225	০১৭৯০৩০১৭৩৮	মোসাঃ নাজমা বেগম	০১৭১৬২১৭৪২৪	30000	33900	26-06-25	25-05-26
-মোঃ ইকবাল হাসান	232	০১৭৭৬৬৪৪৮২৮	----------	----------	50000	56705	26-06-25	25-05-26
-মোঃ নিরব	233	০১৩০৭৫১৪২০২	মোঃ জুয়েল	০১৭১৬২১৭৪২৪	50000	56760	20-07-25	26-06-26
-মোঃ সাইফুল ইসলাম	90	০১৭৮৫৩৩৫০৭৯	মোঃ আলমগীর হোসেন বেপারী	০১৭৩২১২৬৫০৪	50000	57200	10-07-25	10-06-26
-মোঃ আবদুছ ছালাম	218	০১৭১৬৭৭২৬৭৭	মোসাঃ বিলকিছ বেগম	০০০০০০০০	15000	17160	10-07-25	10-06-26
-রিপন সরদার	234	০১৭১৯৩৫৯৫২২		০০০০০০০	50000	57200	07-09-25	07-08-26
-মোঃ আলী সিকদার	58	০১৭৪৪-৮৯৩৩১৮	----------	----------	50000	56000	15-09-25	13-01-26
-ফরিদ উদ্দিন সংগ্রাম আকন	88	০১৭২৪৫৫৬১৯৩	----------	----------	100000	113000	16-10-25	15-09-26
-মোঃ ফজলুর রহমান	190	০১৭৯৫৬৯৩৫২২	-------	---	100000	113000	18-11-25	17-10-26
-শুভ জন্দ্র	134	০১৭১৫১৯৮৯২৬	বিপুল চন্দ্র শিল	০১৭১৫১৯৮৯২৬	100000	112750	20-12-25	19-11-26
-মোঃ জাহিদ হোসাইন	227	০১৭৪১১০৬৪৫৬	মোঃ জাকির হোসেন	০১৭৫৬৩১৫১৩৬	50000	57000	27-12-25	26-11-26
-মোঃ ছানাউল হাওলাদার	230	০১৭৮১৫০০৬৯৯	নাজমা আক্তার	০১৭৫৩৪৪৪৩৭৭	50000	57000	11-01-26	11-01-27
-মোঃ ফারুক সরদার	76	০১৭৬৬৮১৮৪৭৬	মোসাঃ সাহিদা বেগম	০১৭৪০১৩৮৪৩০	50000	57200	09-02-26	09-01-27
-মোঃ হেমায়েত বেপারী	228	০১৭৩২৭৭৪১০৫	রিফাত বেপারী	০১৮৬৭০০৮৮৮৪	50000	57200	25-02-26	25-01-26`;
-
-    const lines = rawData.split('\n');
-    setIsImporting(true);
-    setImportProgress(0);
-    let count = 0;
-
-    const convertDate = (d: string) => {
-      if (!d || d.trim() === '' || d.includes('---')) return '';
-      const p = d.trim().split('-');
-      if (p.length !== 3) return d;
-      let [day, month, year] = p;
-      if (year.length === 2) year = '20' + year;
-      return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+  const handleSaveReport = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    const data = Object.fromEntries(formData.entries());
+    
+    const numericFields = [
+      'prev_month_cash', 'prev_month_bank',
+      'total_installment_coll', 'total_savings_coll', 'service_charge_coll',
+      'new_account_income', 'loan_profile_sale', 'director_deposit', 'office_loan_received',
+      'new_investment_pay', 'general_savings_pay', 'dps_pay', 'general_expense',
+      'director_withdrawal', 'office_loan_repayment',
+      'bank_deposit', 'bank_withdrawal'
+    ];
+    
+    const reportData: any = {
+      month: data.month,
+      year: data.year,
+      updated_at: serverTimestamp(),
+      created_at: editingReport ? editingReport.created_at : serverTimestamp()
     };
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const parts = line.split('\t');
-      if (parts.length < 2) continue;
-
-      const [pName, pAcc, pMobile, pGName, pGMobile, pAmount, pTotal, pSDate, pEDate] = parts;
-
-      const loanData = {
-        customer_name: (pName || '').trim(),
-        account_no: (pAcc || '').trim(),
-        mobile_no: (pMobile || '').trim() === '----------' ? '' : (pMobile || '').trim(),
-        guarantor_name: (pGName || '').trim() === '----------' || (pGName || '').trim() === '-------' ? '' : (pGName || '').trim(),
-        guarantor_mobile_no: (pGMobile || '').trim() === '----------' || (pGMobile || '').trim() === '---' ? '' : (pGMobile || '').trim(),
-        amount: parseFloat(pAmount || '0') || 0,
-        total_with_profit: parseFloat(pTotal || '0') || 0,
-        start_date: convertDate(pSDate || ''),
-        end_date: convertDate(pEDate || ''),
-        status: 'চলমান',
-        created_at: Timestamp.now()
-      };
-
-      try {
-        await addDoc(collection(db, 'loans'), loanData);
-        count++;
-        setImportProgress(Math.round(((i + 1) / lines.length) * 100));
-      } catch (e) {
-        console.error("Error importing line:", line, e);
+    
+    numericFields.forEach(field => {
+      reportData[field] = parseFloat((data[field] as string).replace(/,/g, '')) || 0;
+    });
+    
+    try {
+      if (editingReport) {
+        await updateDoc(doc(db, 'reports', editingReport.id), reportData);
+        alert('রিপোর্ট সফলভাবে আপডেট করা হয়েছে');
+      } else {
+        await addDoc(collection(db, 'reports'), reportData);
+        alert('রিপোর্ট সফলভাবে সংরক্ষণ করা হয়েছে');
       }
+      setEditingReport(null);
+      setShowForm(false);
+      setFormKey(Date.now());
+    } catch (error: any) {
+      console.error("Error saving report:", error);
+      alert('সংরক্ষণ করতে সমস্যা হয়েছে');
     }
-
-    alert(`${count} টি ডাটা সফলভাবে ইমপোর্ট করা হয়েছে। পেজটি এখন রিফ্রেশ হবে।`);
-    setIsImporting(false);
-    window.location.reload();
   };
 
-  const renderHome = () => (
-    <div className="space-y-8">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <StatCard 
-          label="মোট বিনিয়োগ প্রদান (চলমান)" 
-          value={`${loans.filter(l => (l.status || 'চলমান') === 'চলমান').reduce((acc, l) => acc + (Number(l.total_with_profit) || 0), 0).toLocaleString()} ৳`} 
-          icon={HandCoins} 
-          color="border-emerald-600" 
-        />
-        <StatCard 
-          label="মোট সাধারণ সঞ্চয় প্রদান" 
-          value={`${savings.filter(s => s.type === 'general').reduce((acc, s) => acc + (Number(s.amount) || 0), 0).toLocaleString()} ৳`} 
-          icon={PiggyBank} 
-          color="border-blue-600" 
-        />
-        <StatCard 
-          label="মোট মাসিক সঞ্চয় (ডিপিএস) প্রদান" 
-          value={`${savings.filter(s => s.type === 'monthly').reduce((acc, s) => acc + (Number(s.amount) || 0), 0).toLocaleString()} ৳`} 
-          icon={CalendarClock} 
-          color="border-purple-600" 
-        />
-      </div>
+  const handleSaveOutstanding = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    const amount = parseFloat((formData.get('amount') as string).replace(/,/g, '')) || 0;
+    const date = formData.get('date') as string;
+    
+    try {
+      if (editingOutstanding) {
+        await updateDoc(doc(db, 'outstanding_balance', editingOutstanding.id), { amount, date, updated_at: serverTimestamp() });
+        alert('আপডেট করা হয়েছে');
+      } else {
+        await addDoc(collection(db, 'outstanding_balance'), { amount, date, created_at: serverTimestamp() });
+        alert('সংরক্ষণ করা হয়েছে');
+      }
+      setEditingOutstanding(null);
+      setShowForm(false);
+      setFormKey(Date.now());
+    } catch (error) {
+      alert('সমস্যা হয়েছে');
+    }
+  };
 
-      <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="bg-emerald-100 p-2 rounded-lg text-emerald-700">
-            <Info size={20} />
+  const handleDeleteReport = async (id: string) => {
+    if (!confirm('আপনি কি নিশ্চিত যে এই রিপোর্টটি মুছে ফেলতে চান?')) return;
+    try {
+      await deleteDoc(doc(db, 'reports', id));
+      alert('রিপোর্ট মুছে ফেলা হয়েছে');
+    } catch (error) {
+      alert('মুছে ফেলতে সমস্যা হয়েছে');
+    }
+  };
+
+  const handleDeleteOutstanding = async (id: string) => {
+    if (!confirm('আপনি কি নিশ্চিত?')) return;
+    try {
+      await deleteDoc(doc(db, 'outstanding_balance', id));
+      alert('মুছে ফেলা হয়েছে');
+    } catch (error) {
+      alert('সমস্যা হয়েছে');
+    }
+  };
+
+  const getPrevMonth = (month: string, year: string) => {
+    let m = parseInt(month);
+    let y = parseInt(year);
+    if (m === 1) {
+      m = 12;
+      y -= 1;
+    } else {
+      m -= 1;
+    }
+    return { month: m.toString().padStart(2, '0'), year: y.toString() };
+  };
+
+  const renderHome = () => {
+    const latestLoans = [...loans]
+      .sort((a, b) => (a.start_date || '').localeCompare(b.start_date || ''))
+      .slice(-2)
+      .reverse();
+
+    const latestOutstanding = outstandingBalances[0];
+    const outstandingDate = latestOutstanding?.date ? new Date(latestOutstanding.date) : null;
+    const outstandingLabel = outstandingDate 
+      ? `${toBengaliNumber(outstandingDate.getDate())} ${months.find(m => m.value === (outstandingDate.getMonth() + 1).toString().padStart(2, '0'))?.label} বকেয়া মাঠে আছে`
+      : 'বকেয়া মাঠে আছে';
+
+    return (
+      <div className="space-y-8">
+        {/* Latest Investments Section */}
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="bg-orange-100 p-2 rounded-lg text-orange-700">
+                <HandCoins size={20} />
+              </div>
+              <h2 className="text-xl font-bold text-gray-800">সর্বশেষ প্রদান কৃত বিনিয়োগ</h2>
+            </div>
+            <button 
+              onClick={() => setCurrentView('loans')}
+              className="text-emerald-600 text-sm font-bold hover:underline"
+            >
+              সব দেখুন
+            </button>
           </div>
-          <h2 className="text-xl font-bold text-gray-800">প্রতিষ্ঠানের তথ্য</h2>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {latestLoans.length > 0 ? latestLoans.map(loan => (
+              <div key={loan.id} className="flex items-center justify-between p-4 rounded-2xl bg-gray-50 border border-gray-100">
+                <div>
+                  <p className="font-bold text-gray-800">{loan.customer_name}</p>
+                  <p className="text-xs text-gray-500">একাউন্ট: {toBengaliNumber(loan.account_no)} | তারিখ: {formatDate(loan.start_date)}</p>
+                </div>
+                <div className="text-right">
+                  <p className="font-bold text-emerald-700">{formatCurrency(loan.amount)}</p>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                    (loan.status || 'চলমান') === 'চলমান' ? 'bg-orange-100 text-orange-700' : 'bg-emerald-100 text-emerald-700'
+                  }`}>
+                    {loan.status || 'চলমান'}
+                  </span>
+                </div>
+              </div>
+            )) : (
+              <div className="col-span-full text-center py-10 text-gray-400 italic text-sm">
+                কোন বিনিয়োগ তথ্য পাওয়া যায়নি
+              </div>
+            )}
+          </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          <div className="space-y-4">
-            <div>
-              <p className="text-xs text-gray-400 uppercase font-semibold tracking-wider">প্রতিষ্ঠানের নাম</p>
-              <p className="text-lg text-gray-700 font-medium">{societyInfo.name}</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-400 uppercase font-semibold tracking-wider">ঠিকানা</p>
-              <p className="text-lg text-gray-700 font-medium">{societyInfo.address}</p>
+
+        {/* Monthly Report Quick View */}
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="bg-blue-100 p-2 rounded-lg text-blue-700">
+                <Search size={20} />
+              </div>
+              <h2 className="text-xl font-bold text-gray-800">মাসিক রিপোর্ট</h2>
             </div>
           </div>
-          <div className="space-y-4">
-            <div>
-              <p className="text-xs text-gray-400 uppercase font-semibold tracking-wider">স্থাপিত</p>
-              <p className="text-lg text-gray-700 font-medium">{societyInfo.established}</p>
+          
+          {reports.length > 0 ? (
+            <div className="p-6 rounded-2xl bg-blue-50 border border-blue-100 flex flex-col md:flex-row justify-between items-center gap-4">
+              <div>
+                <p className="text-blue-800 font-bold text-lg">
+                  {months.find(m => m.value === reports[0].month)?.label} - {toBengaliNumber(reports[0].year)}
+                </p>
+                <p className="text-sm text-blue-600">সর্বশেষ মাসিক রিপোর্ট</p>
+              </div>
+              <button 
+                onClick={() => setCurrentView('reports')}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-xl font-bold transition-colors shadow-sm"
+              >
+                রিপোর্ট দেখুন
+              </button>
             </div>
-            <div>
-              <p className="text-xs text-gray-400 uppercase font-semibold tracking-wider">নীতিমালা</p>
-              <p className="text-lg text-emerald-700 font-bold">{societyInfo.shariah}</p>
+          ) : (
+            <div className="text-center py-6 text-gray-400 italic text-sm">
+              কোন রিপোর্ট পাওয়া যায়নি
+            </div>
+          )}
+        </div>
+
+        {/* Outstanding Balance Section */}
+        {latestOutstanding && (
+          <button 
+            onClick={() => setCurrentView('outstanding_list')}
+            className="w-full text-left bg-emerald-600 p-8 rounded-3xl shadow-lg text-white relative overflow-hidden transition-transform hover:scale-[1.01] active:scale-[0.99] group"
+          >
+            <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:opacity-20 transition-opacity">
+              <HandCoins size={120} />
+            </div>
+            <div className="relative z-10">
+              <p className="text-emerald-100 text-sm font-bold uppercase tracking-wider mb-2 flex items-center gap-2">
+                {outstandingLabel}
+                <ChevronRight size={16} />
+              </p>
+              <h2 className="text-4xl font-black">{formatCurrency(latestOutstanding.amount)}</h2>
+            </div>
+          </button>
+        )}
+
+
+        {/* Society Info Section */}
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="bg-emerald-100 p-2 rounded-lg text-emerald-700">
+              <Info size={20} />
+            </div>
+            <h2 className="text-xl font-bold text-gray-800">প্রতিষ্ঠানের তথ্য</h2>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
+            <div className="space-y-4">
+              <div>
+                <p className="text-xs text-gray-400 uppercase font-semibold tracking-wider">প্রতিষ্ঠানের নাম</p>
+                <p className="text-lg text-gray-700 font-medium">{societyInfo.name}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-400 uppercase font-semibold tracking-wider">ঠিকানা</p>
+                <p className="text-lg text-gray-700 font-medium">{societyInfo.address}</p>
+              </div>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <p className="text-xs text-gray-400 uppercase font-semibold tracking-wider">স্থাপিত</p>
+                <p className="text-lg text-gray-700 font-medium">{societyInfo.established}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-400 uppercase font-semibold tracking-wider">নীতিমালা</p>
+                <p className="text-lg text-emerald-700 font-bold">{societyInfo.shariah}</p>
+              </div>
             </div>
           </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderLoans = () => (
     <div className="space-y-6">
@@ -706,15 +983,15 @@ export default function App() {
         <div className="grid grid-cols-3 gap-4 mb-6 bg-emerald-50 p-4 rounded-xl border border-emerald-100">
           <div className="text-center">
             <p className="text-xs text-emerald-600 font-bold uppercase">মোট বিনিয়োগ সংখ্যা</p>
-            <p className="text-xl font-bold text-emerald-800">{loans.length}</p>
+            <p className="text-xl font-bold text-emerald-800">{toBengaliNumber(loans.length)}</p>
           </div>
           <div className="text-center border-x border-emerald-200">
             <p className="text-xs text-emerald-600 font-bold uppercase">মোট বিনিয়োগ পরিমাণ</p>
-            <p className="text-xl font-bold text-emerald-800">{loans.reduce((acc, l) => acc + l.amount, 0).toLocaleString()} ৳</p>
+            <p className="text-xl font-bold text-emerald-800">{formatCurrency(loans.reduce((acc, l) => acc + l.amount, 0))}</p>
           </div>
           <div className="text-center">
             <p className="text-xs text-emerald-600 font-bold uppercase">মুনাফাসহ মোট</p>
-            <p className="text-xl font-bold text-emerald-800">{loans.reduce((acc, l) => acc + l.total_with_profit, 0).toLocaleString()} ৳</p>
+            <p className="text-xl font-bold text-emerald-800">{formatCurrency(loans.reduce((acc, l) => acc + l.total_with_profit, 0))}</p>
           </div>
         </div>
 
@@ -738,14 +1015,14 @@ export default function App() {
             <tbody>
               {loans.map((loan, idx) => (
                 <tr key={loan.id} className="hover:bg-gray-50">
-                  <td className="border border-gray-300 p-2 text-center">{idx + 1}</td>
+                  <td className="border border-gray-300 p-2 text-center">{toBengaliNumber(idx + 1)}</td>
                   <td className="border border-gray-300 p-2 font-bold">{loan.customer_name}</td>
-                  <td className="border border-gray-300 p-2 text-center">{loan.account_no}</td>
-                  <td className="border border-gray-300 p-2 text-center">{loan.mobile_no || '----------'}</td>
+                  <td className="border border-gray-300 p-2 text-center">{toBengaliNumber(loan.account_no)}</td>
+                  <td className="border border-gray-300 p-2 text-center">{toBengaliNumber(loan.mobile_no || '----------')}</td>
                   <td className="border border-gray-300 p-2">{loan.guarantor_name || '----------'}</td>
                   <td className="border border-gray-300 p-2 text-center">{loan.guarantor_mobile_no || '----------'}</td>
-                  <td className="border border-gray-300 p-2 text-right font-bold">{loan.amount.toLocaleString()}</td>
-                  <td className="border border-gray-300 p-2 text-right font-bold">{loan.total_with_profit.toLocaleString()}</td>
+                  <td className="border border-gray-300 p-2 text-right font-bold">{formatCurrency(loan.amount)}</td>
+                  <td className="border border-gray-300 p-2 text-right font-bold">{formatCurrency(loan.total_with_profit)}</td>
                   <td className="border border-gray-300 p-2 text-center">{formatDate(loan.start_date)}</td>
                   <td className="border border-gray-300 p-2 text-center">{formatDate(loan.end_date)}</td>
                   <td className="border border-gray-300 p-2 text-center">
@@ -759,7 +1036,9 @@ export default function App() {
               ))}
               {loans.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="border border-gray-300 p-8 text-center text-gray-400 italic">কোন তথ্য পাওয়া যায়নি</td>
+                  <td colSpan={11} className="border border-gray-300 p-8 text-center text-gray-400 italic">
+                    {filters.filterType === '' ? 'দয়া করে একটি ফিল্টার সিলেক্ট করুন' : 'কোন তথ্য পাওয়া যায়নি'}
+                  </td>
                 </tr>
               )}
             </tbody>
@@ -792,11 +1071,11 @@ export default function App() {
         <div className={`grid grid-cols-2 gap-4 mb-6 p-4 rounded-xl border ${type === 'general' ? 'bg-blue-50 border-blue-100' : 'bg-purple-50 border-purple-100'}`}>
           <div className="text-center">
             <p className={`text-xs font-bold uppercase ${type === 'general' ? 'text-blue-600' : 'text-purple-600'}`}>মোট জমাকৃত টাকার পরিমাণ</p>
-            <p className={`text-xl font-bold ${type === 'general' ? 'text-blue-800' : 'text-purple-800'}`}>{savings.reduce((acc, s) => acc + s.amount, 0).toLocaleString()} ৳</p>
+            <p className={`text-xl font-bold ${type === 'general' ? 'text-blue-800' : 'text-purple-800'}`}>{formatCurrency(savings.reduce((acc, s) => acc + s.amount, 0))}</p>
           </div>
           <div className="text-center border-l border-gray-200">
             <p className={`text-xs font-bold uppercase ${type === 'general' ? 'text-blue-600' : 'text-purple-600'}`}>মোট মুনাফা</p>
-            <p className={`text-xl font-bold ${type === 'general' ? 'text-blue-800' : 'text-purple-800'}`}>{savings.reduce((acc, s) => acc + s.profit, 0).toLocaleString()} ৳</p>
+            <p className={`text-xl font-bold ${type === 'general' ? 'text-blue-800' : 'text-purple-800'}`}>{formatCurrency(savings.reduce((acc, s) => acc + s.profit, 0))}</p>
           </div>
         </div>
 
@@ -816,18 +1095,20 @@ export default function App() {
             <tbody>
               {savings.map((saving, idx) => (
                 <tr key={saving.id} className="hover:bg-gray-50">
-                  <td className="border border-gray-300 p-2 text-center">{idx + 1}</td>
+                  <td className="border border-gray-300 p-2 text-center">{toBengaliNumber(idx + 1)}</td>
                   <td className="border border-gray-300 p-2 text-center">{formatDate(saving.date)}</td>
                   <td className="border border-gray-300 p-2 font-bold">{saving.customer_name}</td>
-                  <td className="border border-gray-300 p-2 text-center">{saving.account_no}</td>
-                  <td className="border border-gray-300 p-2 text-right font-bold">{saving.amount.toLocaleString()}</td>
-                  <td className="border border-gray-300 p-2 text-right text-emerald-600 font-bold">{saving.profit.toLocaleString()}</td>
+                  <td className="border border-gray-300 p-2 text-center">{toBengaliNumber(saving.account_no)}</td>
+                  <td className="border border-gray-300 p-2 text-right font-bold">{formatCurrency(saving.amount)}</td>
+                  <td className="border border-gray-300 p-2 text-right text-emerald-600 font-bold">{formatCurrency(saving.profit)}</td>
                   <td className="border border-gray-300 p-2 text-center">{saving.description}</td>
                 </tr>
               ))}
               {savings.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="border border-gray-300 p-8 text-center text-gray-400 italic">কোন তথ্য পাওয়া যায়নি</td>
+                  <td colSpan={7} className="border border-gray-300 p-8 text-center text-gray-400 italic">
+                    {filters.filterType === '' ? 'দয়া করে একটি ফিল্টার সিলেক্ট করুন' : 'কোন তথ্য পাওয়া যায়নি'}
+                  </td>
                 </tr>
               )}
             </tbody>
@@ -837,8 +1118,408 @@ export default function App() {
     </div>
   );
 
-  const [activeAdminTab, setActiveAdminTab] = useState<'loans' | 'general_savings' | 'monthly_savings' | 'settings'>('loans');
-  const [adminFormType, setAdminFormType] = useState<'loan' | 'general_saving' | 'monthly_saving' | null>(null);
+  const OutstandingListView = () => {
+    const [filterMonth, setFilterMonth] = useState('');
+    const [filterYear, setFilterYear] = useState('');
+
+    const filteredBalances = outstandingBalances.filter(item => {
+      const date = new Date(item.date);
+      const monthMatch = filterMonth === '' || (date.getMonth() + 1).toString().padStart(2, '0') === filterMonth;
+      const yearMatch = filterYear === '' || date.getFullYear().toString() === filterYear;
+      return monthMatch && yearMatch;
+    });
+
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+            <HandCoins className="text-emerald-600" /> বকেয়া মাঠে আছে
+          </h2>
+          
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-bold text-gray-600">মাস:</label>
+              <select 
+                value={filterMonth}
+                onChange={(e) => setFilterMonth(e.target.value)}
+                className="p-2 rounded-lg border border-gray-200 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+              >
+                <option value="">সব মাস</option>
+                {months.map(m => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-bold text-gray-600">বছর:</label>
+              <input 
+                type="number"
+                placeholder="বছর (যেমন: ২০২৪)"
+                value={filterYear}
+                onChange={(e) => setFilterYear(e.target.value)}
+                className="p-2 rounded-lg border border-gray-200 text-sm w-24 outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+          <ExcelHeader 
+            title="বকেয়া মাঠে আছে" 
+            societyInfo={societyInfo} 
+          />
+          
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="bg-gray-50">
+                  <th className="border p-3 text-left">মাসের নাম</th>
+                  <th className="border p-3 text-left">বছর</th>
+                  <th className="border p-3 text-right">টাকার পরিমান</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredBalances.length > 0 ? filteredBalances.map(item => {
+                  const date = new Date(item.date);
+                  return (
+                    <tr key={item.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="border p-3">{months.find(m => m.value === (date.getMonth() + 1).toString().padStart(2, '0'))?.label}</td>
+                      <td className="border p-3">{toBengaliNumber(date.getFullYear().toString())}</td>
+                      <td className="border p-3 text-right font-bold text-emerald-700">{formatCurrency(item.amount)}</td>
+                    </tr>
+                  );
+                }) : (
+                  <tr>
+                    <td colSpan={3} className="border p-8 text-center text-gray-400 italic">কোন তথ্য পাওয়া যায়নি</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const ReportsView = () => {
+    const [reportFilters, setReportFilters] = useState({ month: reports[0]?.month || '', year: reports[0]?.year || new Date().getFullYear().toString() });
+    
+    const selectedReport = reports.find(r => r.month === reportFilters.month && r.year === reportFilters.year) || reports[0];
+
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+            <Search className="text-emerald-600" /> মাসিক রিপোর্ট
+          </h2>
+        </div>
+
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+          <div className="flex flex-wrap gap-4 mb-8 bg-gray-50 p-4 rounded-xl border border-gray-100">
+            <div className="flex-1 min-w-[150px]">
+              <label className="block text-xs font-semibold text-gray-500 mb-1">মাস</label>
+              <select 
+                value={reportFilters.month}
+                onChange={(e) => setReportFilters(prev => ({ ...prev, month: e.target.value }))}
+                className="w-full p-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+              >
+                {months.filter(m => m.value !== '').map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
+            </div>
+            <div className="flex-1 min-w-[150px]">
+              <label className="block text-xs font-semibold text-gray-500 mb-1">বছর</label>
+              <input 
+                type="text"
+                value={reportFilters.year}
+                onChange={(e) => setReportFilters(prev => ({ ...prev, year: e.target.value }))}
+                className="w-full p-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+                placeholder="বছর..."
+              />
+            </div>
+          </div>
+
+          {selectedReport ? (
+            <div className="space-y-8">
+              <ExcelHeader 
+                title={`${months.find(m => m.value === selectedReport.month)?.label} - ${toBengaliNumber(selectedReport.year)} এর মাসিক রিপোর্ট`} 
+                societyInfo={societyInfo} 
+              />
+              
+              <div className="space-y-6">
+                <div className="bg-emerald-50 p-6 rounded-2xl border border-emerald-100">
+                  <h4 className="font-bold text-emerald-800 border-b border-emerald-200 pb-2 mb-4">প্রারম্ভিক স্থিতি</h4>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center py-2 border-b border-emerald-100 last:border-0">
+                      <span className="text-gray-600">গত মাসের অবশিষ্ট ক্যাশ টাকা</span>
+                      <span className="font-bold text-emerald-700">{formatCurrency(selectedReport.prev_month_cash)}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-2 border-b border-emerald-100 last:border-0">
+                      <span className="text-gray-600">গত মাসের অবশিষ্ট ব্যাংক স্থিতি</span>
+                      <span className="font-bold text-emerald-700">{formatCurrency(selectedReport.prev_month_bank)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-blue-50 p-6 rounded-2xl border border-blue-100">
+                  <h4 className="font-bold text-blue-800 border-b border-blue-200 pb-2 mb-4">আদায়/উত্তোলন</h4>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center py-2 border-b border-blue-100 last:border-0">
+                      <span className="text-gray-600">মোট কিস্তি আদায়</span>
+                      <span className="font-bold text-blue-700">{formatCurrency(selectedReport.total_installment_coll)}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-2 border-b border-blue-100 last:border-0">
+                      <span className="text-gray-600">মোট সঞ্চয় আদায়</span>
+                      <span className="font-bold text-blue-700">{formatCurrency(selectedReport.total_savings_coll)}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-2 border-b border-blue-100 last:border-0">
+                      <span className="text-gray-600">সার্ভিস চার্জ আদায়</span>
+                      <span className="font-bold text-blue-700">{formatCurrency(selectedReport.service_charge_coll)}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-2 border-b border-blue-100 last:border-0">
+                      <span className="text-gray-600">নতুন একাউন্ট খোলা বাবদ আয়</span>
+                      <span className="font-bold text-blue-700">{formatCurrency(selectedReport.new_account_income)}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-2 border-b border-blue-100 last:border-0">
+                      <span className="text-gray-600">ঋণ প্রোফাইল ফরম বিক্রয়</span>
+                      <span className="font-bold text-blue-700">{formatCurrency(selectedReport.loan_profile_sale)}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-2 border-b border-blue-100 last:border-0">
+                      <span className="text-gray-600">পরিচালকদের জমা</span>
+                      <span className="font-bold text-blue-700">{formatCurrency(selectedReport.director_deposit)}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-2 border-b border-blue-100 last:border-0">
+                      <span className="text-gray-600">অফিস ঋণ গ্রহণ</span>
+                      <span className="font-bold text-blue-700">{formatCurrency(selectedReport.office_loan_received)}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-2 border-b border-blue-100 last:border-0">
+                      <span className="text-gray-600 font-bold">ব্যাংক উত্তোলন</span>
+                      <span className="font-bold text-blue-700">{formatCurrency(selectedReport.bank_withdrawal)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-red-50 p-6 rounded-2xl border border-red-100">
+                  <h4 className="font-bold text-red-800 border-b border-red-200 pb-2 mb-4">ব্যয়/প্রদান</h4>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center py-2 border-b border-red-100 last:border-0">
+                      <span className="text-gray-600">নতুন বিনিয়োগ প্রদান</span>
+                      <span className="font-bold text-red-700">{formatCurrency(selectedReport.new_investment_pay)}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-2 border-b border-red-100 last:border-0">
+                      <span className="text-gray-600">সাধারণ সঞ্চয় প্রদান</span>
+                      <span className="font-bold text-red-700">{formatCurrency(selectedReport.general_savings_pay)}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-2 border-b border-red-100 last:border-0">
+                      <span className="text-gray-600">ডিপিএস (DPS) প্রদান</span>
+                      <span className="font-bold text-red-700">{formatCurrency(selectedReport.dps_pay)}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-2 border-b border-red-100 last:border-0">
+                      <span className="text-gray-600">সাধারণ ব্যয়</span>
+                      <span className="font-bold text-red-700">{formatCurrency(selectedReport.general_expense)}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-2 border-b border-red-100 last:border-0">
+                      <span className="text-gray-600">পরিচালকদের উত্তোলন</span>
+                      <span className="font-bold text-red-700">{formatCurrency(selectedReport.director_withdrawal)}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-2 border-b border-red-100 last:border-0">
+                      <span className="text-gray-600">অফিস ঋণ পরিশোধ</span>
+                      <span className="font-bold text-red-700">{formatCurrency(selectedReport.office_loan_repayment)}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-2 border-b border-red-100 last:border-0">
+                      <span className="text-gray-600 font-bold">ব্যাংক জমা</span>
+                      <span className="font-bold text-red-700">{formatCurrency(selectedReport.bank_deposit)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-gray-800 p-6 rounded-2xl shadow-lg text-white">
+                  <h4 className="font-bold text-emerald-400 border-b border-gray-700 pb-2 mb-4">সমাপনী স্থিতি</h4>
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-300">অবশিষ্ট ক্যাশ টাকা</span>
+                      <span className="text-2xl font-black text-white">
+                        {formatCurrency(
+                          Number(selectedReport.prev_month_cash) + 
+                          Number(selectedReport.total_installment_coll) + 
+                          Number(selectedReport.total_savings_coll) + 
+                          Number(selectedReport.service_charge_coll) + 
+                          Number(selectedReport.new_account_income) + 
+                          Number(selectedReport.loan_profile_sale) + 
+                          Number(selectedReport.director_deposit) + 
+                          Number(selectedReport.office_loan_received) + 
+                          Number(selectedReport.bank_withdrawal) - 
+                          Number(selectedReport.new_investment_pay) - 
+                          Number(selectedReport.general_savings_pay) - 
+                          Number(selectedReport.dps_pay) - 
+                          Number(selectedReport.general_expense) - 
+                          Number(selectedReport.director_withdrawal) - 
+                          Number(selectedReport.office_loan_repayment) - 
+                          Number(selectedReport.bank_deposit)
+                        )}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-300">অবশিষ্ট ব্যাংক স্থিতি</span>
+                      <span className="text-2xl font-black text-white">
+                        {formatCurrency(
+                          Number(selectedReport.prev_month_bank) + 
+                          Number(selectedReport.bank_deposit) - 
+                          Number(selectedReport.bank_withdrawal)
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-20 text-gray-400 italic">
+              এই সময়ের জন্য কোন রিপোর্ট পাওয়া যায়নি
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const ReportForm = ({ editingReport, reports, onSave, onCancel, formKey }: { 
+    editingReport: Report | null, 
+    reports: Report[], 
+    onSave: (e: React.FormEvent<HTMLFormElement>) => void, 
+    onCancel: () => void,
+    formKey: number
+  }) => {
+    const [selectedMonth, setSelectedMonth] = useState(editingReport?.month || '');
+    const [selectedYear, setSelectedYear] = useState(editingReport?.year || new Date().getFullYear().toString());
+    const [prevMonthData, setPrevMonthData] = useState({ cash: 0, bank: 0 });
+
+    useEffect(() => {
+      if (selectedMonth && selectedYear && !editingReport) {
+        const prev = getPrevMonth(selectedMonth, selectedYear);
+        const prevReport = reports.find(r => r.month === prev.month && r.year === prev.year);
+        if (prevReport) {
+          const remCash = Number(prevReport.prev_month_cash) + 
+            Number(prevReport.total_installment_coll) + 
+            Number(prevReport.total_savings_coll) + 
+            Number(prevReport.service_charge_coll) + 
+            Number(prevReport.new_account_income) + 
+            Number(prevReport.loan_profile_sale) + 
+            Number(prevReport.director_deposit) + 
+            Number(prevReport.office_loan_received) + 
+            Number(prevReport.bank_withdrawal) - 
+            Number(prevReport.new_investment_pay) - 
+            Number(prevReport.general_savings_pay) - 
+            Number(prevReport.dps_pay) - 
+            Number(prevReport.general_expense) - 
+            Number(prevReport.director_withdrawal) - 
+            Number(prevReport.office_loan_repayment) - 
+            Number(prevReport.bank_deposit);
+          
+          const remBank = Number(prevReport.prev_month_bank) + 
+            Number(prevReport.bank_deposit) - 
+            Number(prevReport.bank_withdrawal);
+            
+          setPrevMonthData({ cash: remCash, bank: remBank });
+        } else {
+          setPrevMonthData({ cash: 0, bank: 0 });
+        }
+      }
+    }, [selectedMonth, selectedYear, editingReport, reports]);
+
+    return (
+      <form key={formKey} onSubmit={onSave} className="space-y-6">
+        <h3 className="text-lg font-bold text-gray-800 border-b pb-2">{editingReport ? 'রিপোর্ট এডিট করুন' : 'নতুন মাসিক রিপোর্ট তৈরি'}</h3>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">মাসের নাম</label>
+            <select 
+              required 
+              name="month" 
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              className="w-full px-4 py-2 rounded-lg border border-gray-200 outline-none focus:ring-2 focus:ring-emerald-500"
+            >
+              <option value="">সিলেক্ট করুন</option>
+              {months.filter(m => m.value !== '').map(m => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">বছর</label>
+            <input 
+              required 
+              name="year" 
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(e.target.value)}
+              type="text" 
+              className="w-full px-4 py-2 rounded-lg border border-gray-200 outline-none focus:ring-2 focus:ring-emerald-500" 
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6 bg-gray-50 rounded-2xl border border-gray-100">
+          <div className="space-y-4">
+            <h4 className="font-bold text-emerald-700 border-b border-emerald-100 pb-1">প্রারম্ভিক স্থিতি</h4>
+            <CurrencyInput name="prev_month_cash" defaultValue={editingReport?.prev_month_cash ?? prevMonthData.cash} label="গত মাসের অবশিষ্ট ক্যাশ টাকা" />
+            <CurrencyInput name="prev_month_bank" defaultValue={editingReport?.prev_month_bank ?? prevMonthData.bank} label="গত মাসের অবশিষ্ট ব্যাংক স্থিতি" />
+            
+            <h4 className="font-bold text-blue-700 border-b border-blue-100 pb-1 pt-2">আদায়/উত্তোলন</h4>
+            <CurrencyInput name="total_installment_coll" defaultValue={editingReport?.total_installment_coll} label="মোট কিস্তি আদায়" />
+            <CurrencyInput name="total_savings_coll" defaultValue={editingReport?.total_savings_coll} label="মোট সঞ্চয় আদায়" />
+            <CurrencyInput name="service_charge_coll" defaultValue={editingReport?.service_charge_coll} label="সার্ভিস চার্জ আদায়" />
+            <CurrencyInput name="new_account_income" defaultValue={editingReport?.new_account_income} label="নতুন একাউন্ট খোলা বাবদ আয়" />
+            <CurrencyInput name="loan_profile_sale" defaultValue={editingReport?.loan_profile_sale} label="ঋণ প্রোফাইল ফরম বিক্রয়" />
+            <CurrencyInput name="director_deposit" defaultValue={editingReport?.director_deposit} label="পরিচালকদের জমা" />
+            <CurrencyInput name="office_loan_received" defaultValue={editingReport?.office_loan_received} label="অফিস ঋণ গ্রহণ" />
+          </div>
+          
+          <div className="space-y-4">
+            <h4 className="font-bold text-red-700 border-b border-red-100 pb-1">ব্যয়/প্রদান</h4>
+            <CurrencyInput name="new_investment_pay" defaultValue={editingReport?.new_investment_pay} label="নতুন বিনিয়োগ প্রদান" />
+            <CurrencyInput name="general_savings_pay" defaultValue={editingReport?.general_savings_pay} label="সাধারণ সঞ্চয় প্রদান" />
+            <CurrencyInput name="dps_pay" defaultValue={editingReport?.dps_pay} label="ডিপিএস (DPS) প্রদান" />
+            <CurrencyInput name="general_expense" defaultValue={editingReport?.general_expense} label="সাধারণ ব্যয়" />
+            <CurrencyInput name="director_withdrawal" defaultValue={editingReport?.director_withdrawal} label="পরিচালকদের উত্তোলন" />
+            <CurrencyInput name="office_loan_repayment" defaultValue={editingReport?.office_loan_repayment} label="অফিস ঋণ পরিশোধ" />
+            
+            <h4 className="font-bold text-gray-700 border-b border-gray-100 pb-1 pt-2">ব্যাংক লেনদেন</h4>
+            <CurrencyInput name="bank_deposit" defaultValue={editingReport?.bank_deposit} label="ব্যাংক জমা" />
+            <CurrencyInput name="bank_withdrawal" defaultValue={editingReport?.bank_withdrawal} label="ব্যাংক উত্তোলন" />
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-3">
+          <button type="button" onClick={onCancel} className="px-6 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">বাতিল</button>
+          <button type="submit" className="px-6 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-colors shadow-sm">{editingReport ? 'আপডেট করুন' : 'সংরক্ষণ করুন'}</button>
+        </div>
+      </form>
+    );
+  };
+
+  const renderOutstandingBalanceForm = () => (
+    <form key={formKey} onSubmit={handleSaveOutstanding} className="space-y-6">
+      <h3 className="text-lg font-bold text-gray-800 border-b pb-2">{editingOutstanding ? 'বকেয়া স্থিতি এডিট করুন' : 'নতুন বকেয়া স্থিতি যোগ করুন'}</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <CurrencyInput required name="amount" defaultValue={editingOutstanding?.amount} label="মাঠে বকেয়া স্থিতির পরিমান" />
+        <div>
+          <label className="block text-sm font-bold text-gray-700 mb-1">তারিখ নির্বাচন করুন</label>
+          <input 
+            type="date" 
+            name="date" 
+            required 
+            defaultValue={editingOutstanding?.date || new Date().toISOString().split('T')[0]}
+            className="w-full p-3 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+          />
+        </div>
+      </div>
+      <div className="flex justify-end gap-3 pt-4">
+        <button type="button" onClick={() => { setShowForm(false); setEditingOutstanding(null); }} className="px-6 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">বাতিল</button>
+        <button type="submit" className="px-6 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-colors shadow-sm">{editingOutstanding ? 'আপডেট করুন' : 'সংরক্ষণ করুন'}</button>
+      </div>
+    </form>
+  );
 
   const renderAdmin = () => (
     <div className="space-y-6">
@@ -848,22 +1529,34 @@ export default function App() {
         </h2>
         <div className="flex gap-2">
           <button 
-            onClick={() => { setAdminFormType('loan'); setShowForm(true); }}
+            onClick={() => { setEditingLoan(null); setAdminFormType('loan'); setFormKey(Date.now()); setShowForm(true); }}
             className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors shadow-sm"
           >
             <Plus size={16} /> বিনিয়োগ
           </button>
           <button 
-            onClick={() => { setAdminFormType('general_saving'); setShowForm(true); }}
+            onClick={() => { setEditingSaving(null); setAdminFormType('general_saving'); setFormKey(Date.now()); setShowForm(true); }}
             className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors shadow-sm"
           >
             <Plus size={16} /> সাধারণ সঞ্চয়
           </button>
           <button 
-            onClick={() => { setAdminFormType('monthly_saving'); setShowForm(true); }}
+            onClick={() => { setEditingSaving(null); setAdminFormType('monthly_saving'); setFormKey(Date.now()); setShowForm(true); }}
             className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors shadow-sm"
           >
             <Plus size={16} /> ডিপিএস
+          </button>
+          <button 
+            onClick={() => { setEditingReport(null); setAdminFormType('report'); setFormKey(Date.now()); setShowForm(true); }}
+            className="bg-orange-600 hover:bg-orange-700 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors shadow-sm"
+          >
+            <Plus size={16} /> রিপোর্ট
+          </button>
+          <button 
+            onClick={() => { setEditingOutstanding(null); setAdminFormType('outstanding'); setFormKey(Date.now()); setShowForm(true); }}
+            className="bg-gray-600 hover:bg-gray-700 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors shadow-sm"
+          >
+            <Plus size={16} /> বকেয়া
           </button>
         </div>
       </div>
@@ -893,6 +1586,18 @@ export default function App() {
           ডিপিএস ব্যবস্থাপনা
         </button>
         <button 
+          onClick={() => setActiveAdminTab('reports')}
+          className={`px-6 py-3 text-sm font-bold transition-colors border-b-2 ${activeAdminTab === 'reports' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
+        >
+          মাসিক রিপোর্ট ব্যবস্থাপনা
+        </button>
+        <button 
+          onClick={() => setActiveAdminTab('outstanding')}
+          className={`px-6 py-3 text-sm font-bold transition-colors border-b-2 ${activeAdminTab === 'outstanding' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
+        >
+          বকেয়া স্থিতি ব্যবস্থাপনা
+        </button>
+        <button 
           onClick={() => setActiveAdminTab('settings')}
           className={`px-6 py-3 text-sm font-bold transition-colors border-b-2 ${activeAdminTab === 'settings' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
         >
@@ -917,9 +1622,9 @@ export default function App() {
               <tbody>
                 {loans.map(loan => (
                   <tr key={loan.id} className="hover:bg-gray-50">
-                    <td className="border border-gray-300 p-2 text-center">{loan.account_no}</td>
+                    <td className="border border-gray-300 p-2 text-center">{toBengaliNumber(loan.account_no)}</td>
                     <td className="border border-gray-300 p-2 font-bold">{loan.customer_name}</td>
-                    <td className="border border-gray-300 p-2 text-right">{loan.amount.toLocaleString()}</td>
+                    <td className="border border-gray-300 p-2 text-right">{formatCurrency(loan.amount)}</td>
                     <td className="border border-gray-300 p-2 text-center">{formatDate(loan.start_date)}</td>
                     <td className="border border-gray-300 p-2 text-center">
                       <select 
@@ -936,7 +1641,7 @@ export default function App() {
                     <td className="border border-gray-300 p-2 text-center">
                       <div className="flex items-center justify-center gap-2">
                         <button 
-                          onClick={() => { setEditingLoan(loan); setAdminFormType('loan'); setShowForm(true); }}
+                          onClick={() => { setEditingLoan(loan); setAdminFormType('loan'); setFormKey(Date.now()); setShowForm(true); }}
                           className="text-blue-600 hover:text-blue-800 font-bold"
                         >
                           এডিট
@@ -979,14 +1684,14 @@ export default function App() {
                   .filter(s => activeAdminTab === 'general_savings' ? s.type === 'general' : s.type === 'monthly')
                   .map(saving => (
                   <tr key={saving.id} className="hover:bg-gray-50">
-                    <td className="border border-gray-300 p-2 text-center">{saving.account_no}</td>
+                    <td className="border border-gray-300 p-2 text-center">{toBengaliNumber(saving.account_no)}</td>
                     <td className="border border-gray-300 p-2 font-bold">{saving.customer_name}</td>
-                    <td className="border border-gray-300 p-2 text-right">{saving.amount.toLocaleString()}</td>
+                    <td className="border border-gray-300 p-2 text-right">{formatCurrency(saving.amount)}</td>
                     <td className="border border-gray-300 p-2 text-center">{formatDate(saving.date)}</td>
                     <td className="border border-gray-300 p-2 text-center">
                       <div className="flex items-center justify-center gap-2">
                         <button 
-                          onClick={() => { setEditingSaving(saving); setAdminFormType(saving.type === 'general' ? 'general_saving' : 'monthly_saving'); setShowForm(true); }}
+                          onClick={() => { setEditingSaving(saving); setAdminFormType(saving.type === 'general' ? 'general_saving' : 'monthly_saving'); setFormKey(Date.now()); setShowForm(true); }}
                           className="text-blue-600 hover:text-blue-800 font-bold"
                         >
                           এডিট
@@ -1002,6 +1707,125 @@ export default function App() {
                     </td>
                   </tr>
                 ))}
+                {savings.filter(s => activeAdminTab === 'general_savings' ? s.type === 'general' : s.type === 'monthly').length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="border border-gray-300 p-8 text-center text-gray-400 italic">কোন তথ্য পাওয়া যায়নি</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {activeAdminTab === 'reports' && (
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse border border-gray-300 text-xs">
+              <thead>
+                <tr className="bg-gray-50">
+                  <th className="border border-gray-300 p-2">মাস</th>
+                  <th className="border border-gray-300 p-2">বছর</th>
+                  <th className="border border-gray-300 p-2">অবশিষ্ট ক্যাশ</th>
+                  <th className="border border-gray-300 p-2">ব্যাংক স্থিতি</th>
+                  <th className="border border-gray-300 p-2">অ্যাকশন</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reports.map(report => {
+                  const remCash = Number(report.prev_month_cash) + 
+                    Number(report.total_installment_coll) + 
+                    Number(report.total_savings_coll) + 
+                    Number(report.service_charge_coll) + 
+                    Number(report.new_account_income) + 
+                    Number(report.loan_profile_sale) + 
+                    Number(report.director_deposit) + 
+                    Number(report.office_loan_received) + 
+                    Number(report.bank_withdrawal) - 
+                    Number(report.new_investment_pay) - 
+                    Number(report.general_savings_pay) - 
+                    Number(report.dps_pay) - 
+                    Number(report.general_expense) - 
+                    Number(report.director_withdrawal) - 
+                    Number(report.office_loan_repayment) - 
+                    Number(report.bank_deposit);
+                  
+                  const remBank = Number(report.prev_month_bank) + 
+                    Number(report.bank_deposit) - 
+                    Number(report.bank_withdrawal);
+
+                  return (
+                    <tr key={report.id} className="hover:bg-gray-50">
+                      <td className="border border-gray-300 p-2 text-center">{months.find(m => m.value === report.month)?.label}</td>
+                      <td className="border border-gray-300 p-2 text-center">{toBengaliNumber(report.year)}</td>
+                      <td className="border border-gray-300 p-2 text-right font-bold">{formatCurrency(remCash)}</td>
+                      <td className="border border-gray-300 p-2 text-right font-bold">{formatCurrency(remBank)}</td>
+                      <td className="border border-gray-300 p-2 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          <button 
+                            onClick={() => { setEditingReport(report); setAdminFormType('report'); setFormKey(Date.now()); setShowForm(true); }}
+                            className="text-blue-600 hover:text-blue-800 font-bold"
+                          >
+                            এডিট
+                          </button>
+                          <button 
+                            onClick={() => handleDeleteReport(report.id)}
+                            className="text-red-600 hover:text-red-800 font-bold"
+                          >
+                            মুছুন
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {reports.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="border border-gray-300 p-8 text-center text-gray-400 italic">কোন রিপোর্ট পাওয়া যায়নি</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {activeAdminTab === 'outstanding' && (
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse border border-gray-300 text-xs">
+              <thead>
+                <tr className="bg-gray-50">
+                  <th className="border border-gray-300 p-2">পরিমাণ</th>
+                  <th className="border border-gray-300 p-2">তারিখ</th>
+                  <th className="border border-gray-300 p-2">অ্যাকশন</th>
+                </tr>
+              </thead>
+              <tbody>
+                {outstandingBalances.length > 0 ? outstandingBalances.map(item => (
+                  <tr key={item.id} className="hover:bg-gray-50">
+                    <td className="border border-gray-300 p-2 text-right font-bold">{formatCurrency(item.amount)}</td>
+                    <td className="border border-gray-300 p-2 text-center">
+                      {item.date ? formatDate(item.date) : (item.created_at?.toDate ? formatDate(item.created_at.toDate().toISOString().split('T')[0]) : '---')}
+                    </td>
+                    <td className="border border-gray-300 p-2 text-center">
+                      <div className="flex items-center justify-center gap-2">
+                        <button 
+                          onClick={() => { setEditingOutstanding(item); setAdminFormType('outstanding'); setFormKey(Date.now()); setShowForm(true); }}
+                          className="text-blue-600 hover:text-blue-800 font-bold"
+                        >
+                          এডিট
+                        </button>
+                        <button 
+                          onClick={() => handleDeleteOutstanding(item.id)}
+                          className="text-red-600 hover:text-red-800 font-bold"
+                        >
+                          মুছুন
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )) : (
+                  <tr>
+                    <td colSpan={3} className="border border-gray-300 p-8 text-center text-gray-400 italic">কোন তথ্য পাওয়া যায়নি</td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -1051,18 +1875,6 @@ export default function App() {
                 </button>
               </form>
             </div>
-
-            <div className="space-y-4 pt-6 border-t border-gray-100">
-              <h3 className="font-bold text-red-600">ডাটা ইমপোর্ট (একবার ব্যবহারযোগ্য)</h3>
-              <p className="text-xs text-gray-500">আপনার দেওয়া বিনিয়োগের ডাটাগুলো এখানে ক্লিক করে ইমপোর্ট করুন।</p>
-              <button 
-                onClick={handleBulkImport}
-                disabled={isImporting}
-                className="bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-orange-700 transition-colors disabled:opacity-50"
-              >
-                {isImporting ? `ইমপোর্ট হচ্ছে (${importProgress}%)` : 'বিনিয়োগ ডাটা ইমপোর্ট করুন'}
-              </button>
-            </div>
           </div>
         )}
       </div>
@@ -1070,7 +1882,7 @@ export default function App() {
   );
 
   const renderLoanForm = () => (
-    <form onSubmit={handleAddLoan} className="space-y-4">
+    <form key={formKey} onSubmit={handleAddLoan} className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">গ্রাহকের নাম</label>
@@ -1093,12 +1905,10 @@ export default function App() {
           <input name="guarantor_mobile_no" defaultValue={editingLoan?.guarantor_mobile_no} type="tel" className="w-full px-4 py-2 rounded-lg border border-gray-200 outline-none focus:ring-2 focus:ring-emerald-500" />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">বিনিয়োগের পরিমান</label>
-          <input required name="amount" defaultValue={editingLoan?.amount} type="number" className="w-full px-4 py-2 rounded-lg border border-gray-200 outline-none focus:ring-2 focus:ring-emerald-500" />
+          <CurrencyInput required name="amount" defaultValue={editingLoan?.amount} label="বিনিয়োগের পরিমান" />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">মুনাফাসহ মোট</label>
-          <input required name="total_with_profit" defaultValue={editingLoan?.total_with_profit} type="number" className="w-full px-4 py-2 rounded-lg border border-gray-200 outline-none focus:ring-2 focus:ring-emerald-500" />
+          <CurrencyInput required name="total_with_profit" defaultValue={editingLoan?.total_with_profit} label="মুনাফাসহ মোট" />
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">বিনিয়োগ প্রদানের তারিখ</label>
@@ -1117,7 +1927,7 @@ export default function App() {
   );
 
   const renderSavingForm = (type: 'general' | 'monthly') => (
-    <form onSubmit={(e) => handleAddSaving(e, type)} className="space-y-4">
+    <form key={formKey} onSubmit={(e) => handleAddSaving(e, type)} className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">তারিখ</label>
@@ -1132,26 +1942,43 @@ export default function App() {
           <input required name="account_no" defaultValue={editingSaving?.account_no} type="text" className="w-full px-4 py-2 rounded-lg border border-gray-200 outline-none focus:ring-2 focus:ring-emerald-500" />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">জমাকৃত টাকার পরিমাণ</label>
-          <input required name="amount" defaultValue={editingSaving?.amount} type="number" className="w-full px-4 py-2 rounded-lg border border-gray-200 outline-none focus:ring-2 focus:ring-emerald-500" />
+          <CurrencyInput required name="amount" defaultValue={editingSaving?.amount} label="টাকার পরিমাণ" />
         </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">মুনাফা</label>
-          <input name="profit" defaultValue={editingSaving?.profit || 0} type="number" className="w-full px-4 py-2 rounded-lg border border-gray-200 outline-none focus:ring-2 focus:ring-emerald-500" />
+        {type === 'monthly' && (
+          <div>
+            <CurrencyInput name="profit" defaultValue={editingSaving?.profit} label="মুনাফা" />
+          </div>
+        )}
+        <div className="md:col-span-2">
+          <label className="block text-sm font-medium text-gray-700 mb-1">বিবরণ</label>
+          <textarea name="description" defaultValue={editingSaving?.description} rows={2} className="w-full px-4 py-2 rounded-lg border border-gray-200 outline-none focus:ring-2 focus:ring-emerald-500" />
         </div>
       </div>
       <div className="flex justify-end gap-3 pt-4">
         <button type="button" onClick={() => { setShowForm(false); setEditingSaving(null); }} className="px-6 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">বাতিল</button>
-        <button type="submit" className={`px-6 py-2 rounded-lg ${type === 'general' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-purple-600 hover:bg-purple-700'} text-white transition-colors shadow-sm`}>{editingSaving ? 'আপডেট করুন' : 'সংরক্ষণ করুন'}</button>
+        <button type="submit" className="px-6 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-sm">{editingSaving ? 'আপডেট করুন' : 'সংরক্ষণ করুন'}</button>
       </div>
     </form>
   );
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col md:flex-row font-sans text-gray-900">
-      {/* Sidebar - Desktop */}
+    <div className="min-h-screen bg-[#F8FAFC] flex flex-col md:flex-row font-sans text-gray-900">
+      {/* Mobile Menu Overlay */}
+      <AnimatePresence>
+        {isMobileMenuOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setIsMobileMenuOpen(false)}
+            className="md:hidden fixed inset-0 bg-black/20 backdrop-blur-sm z-40"
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Sidebar */}
       <aside className="hidden md:flex w-72 bg-white border-r border-gray-100 flex-col p-6 sticky top-0 h-screen">
-        <div className="flex items-center gap-3 mb-10 px-2">
+        <div className="flex items-center gap-3 mb-10 px-2 cursor-pointer" onClick={() => setCurrentView('home')}>
           <div className={`${settings.logo_url ? '' : 'bg-emerald-600 p-2 shadow-md'} rounded-xl text-white overflow-hidden w-10 h-10 flex items-center justify-center`}>
             {settings.logo_url ? (
               <img src={settings.logo_url} alt="Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
@@ -1167,6 +1994,8 @@ export default function App() {
           <NavItem active={currentView === 'loans'} icon={HandCoins} label="বিনিয়োগ (লোন) প্রদান" onClick={() => setCurrentView('loans')} />
           <NavItem active={currentView === 'general_savings'} icon={PiggyBank} label="সাধারণ সঞ্চয় প্রদান" onClick={() => setCurrentView('general_savings')} />
           <NavItem active={currentView === 'monthly_savings'} icon={CalendarClock} label="মাসিক সঞ্চয় (ডিপিএস) প্রদান" onClick={() => setCurrentView('monthly_savings')} />
+          <NavItem active={currentView === 'reports'} icon={Search} label="মাসিক রিপোর্ট" onClick={() => setCurrentView('reports')} />
+          <NavItem active={currentView === 'outstanding_list'} icon={HandCoins} label="বকেয়া মাঠে আছে" onClick={() => setCurrentView('outstanding_list')} />
           <NavItem active={currentView === 'admin' || currentView === 'login'} icon={Filter} label="এডমিন প্যানেল" onClick={() => {
             if (isLoggedIn) setCurrentView('admin');
             else setCurrentView('login');
@@ -1176,14 +2005,14 @@ export default function App() {
         <div className="mt-auto bg-emerald-50 p-4 rounded-2xl border border-emerald-100">
           <p className="text-xs text-emerald-600 font-semibold uppercase tracking-wider mb-2">সহযোগিতার জন্য</p>
           <p className="text-sm font-medium flex items-center gap-2 text-emerald-800">
-            <Phone size={14} /> ০১৭০০-০০০০০০
+            <Phone size={14} /> ০১৩০০-৫৯৪৫২২
           </p>
         </div>
       </aside>
 
       {/* Mobile Nav */}
       <div className="md:hidden bg-white border-b border-gray-100 p-4 flex items-center justify-between sticky top-0 z-50">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 cursor-pointer" onClick={() => setCurrentView('home')}>
           <div className={`${settings.logo_url ? '' : 'bg-emerald-600 p-1.5 shadow-sm'} rounded-lg text-white overflow-hidden w-8 h-8 flex items-center justify-center`}>
             {settings.logo_url ? (
               <img src={settings.logo_url} alt="Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
@@ -1210,6 +2039,8 @@ export default function App() {
             <NavItem active={currentView === 'loans'} icon={HandCoins} label="বিনিয়োগ (লোন) প্রদান" onClick={() => { setCurrentView('loans'); setIsMobileMenuOpen(false); }} />
             <NavItem active={currentView === 'general_savings'} icon={PiggyBank} label="সাধারণ সঞ্চয় প্রদান" onClick={() => { setCurrentView('general_savings'); setIsMobileMenuOpen(false); }} />
             <NavItem active={currentView === 'monthly_savings'} icon={CalendarClock} label="মাসিক সঞ্চয় (ডিপিএস) প্রদান" onClick={() => { setCurrentView('monthly_savings'); setIsMobileMenuOpen(false); }} />
+            <NavItem active={currentView === 'reports'} icon={Search} label="মাসিক রিপোর্ট" onClick={() => { setCurrentView('reports'); setIsMobileMenuOpen(false); }} />
+            <NavItem active={currentView === 'outstanding_list'} icon={HandCoins} label="বকেয়া মাঠে আছে" onClick={() => { setCurrentView('outstanding_list'); setIsMobileMenuOpen(false); }} />
             <NavItem active={currentView === 'admin' || currentView === 'login'} icon={Filter} label="এডমিন প্যানেল" onClick={() => { 
               if (isLoggedIn) setCurrentView('admin');
               else setCurrentView('login');
@@ -1221,7 +2052,7 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 p-4 md:p-10 max-w-7xl mx-auto w-full">
-        {currentView === 'home' && <Header societyInfo={societyInfo} logoUrl={settings.logo_url} />}
+        {currentView === 'home' && <Header societyInfo={societyInfo} logoUrl={settings.logo_url} onLogoClick={() => setCurrentView('home')} />}
         
         {fetchError && (
           <div className="mt-4 bg-red-50 border border-red-200 text-red-700 p-6 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-4">
@@ -1229,39 +2060,10 @@ export default function App() {
               <p className="font-bold">তথ্য লোড করতে সমস্যা হয়েছে</p>
               <p className="text-sm opacity-80">{fetchError}</p>
             </div>
-            <div className="flex gap-2">
-              <button 
-                onClick={() => fetchData()}
-                className="bg-red-600 text-white px-6 py-2 rounded-xl font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-100 whitespace-nowrap"
-              >
-                আবার চেষ্টা করুন
-              </button>
-              <button 
-                onClick={handleBulkImport}
-                disabled={isImporting}
-                className="bg-orange-600 text-white px-6 py-2 rounded-xl font-bold hover:bg-orange-700 transition-all shadow-lg shadow-orange-100 whitespace-nowrap disabled:opacity-50"
-              >
-                {isImporting ? `সেভ হচ্ছে (${importProgress}%)` : 'সরাসরি ডাটা সেভ করুন'}
-              </button>
-            </div>
           </div>
         )}
 
         <div className="mt-4">
-          {isLoading && !fetchError && (
-            <div className="flex flex-col items-center justify-center py-12 bg-white/50 rounded-3xl border border-dashed border-emerald-200 mb-8">
-              <div className="w-10 h-10 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mb-4"></div>
-              <p className="text-emerald-800 font-bold animate-pulse mb-4">তথ্য লোড হচ্ছে...</p>
-              <button 
-                onClick={handleBulkImport}
-                disabled={isImporting}
-                className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-2 rounded-xl text-sm font-bold transition-all shadow-lg shadow-orange-100 disabled:opacity-50"
-              >
-                {isImporting ? `সেভ হচ্ছে (${importProgress}%)` : 'লোড না হলে এখানে ক্লিক করে ডাটা সেভ করুন'}
-              </button>
-            </div>
-          )}
-
           <motion.div
             key={currentView}
             initial={{ opacity: 0, x: 10 }}
@@ -1272,6 +2074,8 @@ export default function App() {
             {currentView === 'loans' && renderLoans()}
             {currentView === 'general_savings' && renderSavings('general')}
             {currentView === 'monthly_savings' && renderSavings('monthly')}
+            {currentView === 'reports' && <ReportsView />}
+            {currentView === 'outstanding_list' && <OutstandingListView />}
             {currentView === 'admin' && isLoggedIn && renderAdmin()}
             {currentView === 'login' && !isLoggedIn && (
               <div className="max-w-md mx-auto mt-10 bg-white p-8 rounded-3xl shadow-xl border border-gray-100">
@@ -1320,7 +2124,9 @@ export default function App() {
               <div className={`p-6 flex items-center justify-between text-white ${
                 currentView === 'admin' ? (
                   adminFormType === 'loan' ? 'bg-emerald-600' : 
-                  adminFormType === 'general_saving' ? 'bg-blue-600' : 'bg-purple-600'
+                  adminFormType === 'general_saving' ? 'bg-blue-600' : 
+                  adminFormType === 'monthly_saving' ? 'bg-purple-600' :
+                  adminFormType === 'report' ? 'bg-orange-600' : 'bg-gray-600'
                 ) : (
                   currentView === 'loans' ? 'bg-emerald-600' : 
                   currentView === 'general_savings' ? 'bg-blue-600' : 'bg-purple-600'
@@ -1330,20 +2136,32 @@ export default function App() {
                   <Plus size={24} /> 
                   {currentView === 'admin' ? (
                     adminFormType === 'loan' ? 'নতুন বিনিয়োগ ফর্ম' : 
-                    adminFormType === 'general_saving' ? 'সাধারণ সঞ্চয় ফর্ম' : 'মাসিক সঞ্চয় (ডিপিএস) ফর্ম'
+                    adminFormType === 'general_saving' ? 'সাধারণ সঞ্চয় ফর্ম' : 
+                    adminFormType === 'monthly_saving' ? 'মাসিক সঞ্চয় (ডিপিএস) ফর্ম' :
+                    adminFormType === 'report' ? 'মাসিক রিপোর্ট ফর্ম' : 'বকেয়া স্থিতি ফর্ম'
                   ) : (
                     currentView === 'loans' ? 'নতুন বিনিয়োগ ফর্ম' : 
                     currentView === 'general_savings' ? 'সাধারণ সঞ্চয় ফর্ম' : 'মাসিক সঞ্চয় (ডিপিএস) ফর্ম'
                   )}
                 </h3>
-                <button onClick={() => { setShowForm(false); setEditingLoan(null); setEditingSaving(null); }} className="hover:bg-white/20 p-1 rounded-lg transition-colors">
+                <button onClick={() => { setShowForm(false); setEditingLoan(null); setEditingSaving(null); setEditingReport(null); setEditingOutstanding(null); }} className="hover:bg-white/20 p-1 rounded-lg transition-colors">
                   <X size={24} />
                 </button>
               </div>
               <div className="p-8 max-h-[80vh] overflow-y-auto">
                 {currentView === 'admin' ? (
                   adminFormType === 'loan' ? renderLoanForm() : 
-                  adminFormType === 'general_saving' ? renderSavingForm('general') : renderSavingForm('monthly')
+                  adminFormType === 'general_saving' ? renderSavingForm('general') : 
+                  adminFormType === 'monthly_saving' ? renderSavingForm('monthly') :
+                  adminFormType === 'report' ? (
+                    <ReportForm 
+                      editingReport={editingReport} 
+                      reports={reports} 
+                      onSave={handleSaveReport} 
+                      onCancel={() => { setShowForm(false); setEditingReport(null); }} 
+                      formKey={formKey}
+                    />
+                  ) : renderOutstandingBalanceForm()
                 ) : (
                   currentView === 'loans' ? renderLoanForm() : 
                   currentView === 'general_savings' ? renderSavingForm('general') : renderSavingForm('monthly')
