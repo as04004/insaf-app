@@ -11,6 +11,7 @@ import {
   CalendarClock, 
   Plus, 
   Search, 
+  FileText,
   Menu, 
   X,
   MapPin,
@@ -99,12 +100,26 @@ interface OutstandingBalance {
   created_at: any;
 }
 
+interface OutstandingMonthlyReport {
+  id: string;
+  month: string;
+  year: string;
+  last_month_outstanding: number;
+  current_month_investment: number;
+  total_last_plus_investment: number;
+  current_month_collection: number;
+  should_be_in_field: number;
+  actually_in_field: number;
+  difference: number;
+  created_at: any;
+}
+
 interface Setting {
   admin_password?: string;
   logo_url?: string;
 }
 
-type View = 'home' | 'loans' | 'general_savings' | 'monthly_savings' | 'reports' | 'outstanding_list' | 'admin' | 'login';
+type View = 'home' | 'loans' | 'general_savings' | 'monthly_savings' | 'reports' | 'outstanding_list' | 'outstanding_monthly_report' | 'admin' | 'login';
 
 // --- Components ---
 
@@ -281,11 +296,15 @@ const CurrencyInput = ({
   label, 
   name, 
   defaultValue, 
+  value,
+  onChange,
   required = false 
 }: { 
   label: string, 
   name: string, 
   defaultValue?: number | string, 
+  value?: string,
+  onChange?: (val: string) => void,
   required?: boolean 
 }) => {
   const [displayValue, setDisplayValue] = useState('');
@@ -296,10 +315,20 @@ const CurrencyInput = ({
     }
   }, [defaultValue]);
 
+  useEffect(() => {
+    if (value !== undefined) {
+      setDisplayValue(formatCurrency(value));
+    }
+  }, [value]);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const rawValue = toEnglishNumber(e.target.value).replace(/,/g, '');
     if (rawValue === '' || /^\d*\.?\d*$/.test(rawValue)) {
-      setDisplayValue(rawValue === '' ? '' : formatCurrency(rawValue));
+      const formatted = rawValue === '' ? '' : formatCurrency(rawValue);
+      setDisplayValue(formatted);
+      if (onChange) {
+        onChange(rawValue);
+      }
     }
   };
 
@@ -361,6 +390,7 @@ export default function App() {
     } catch { return []; }
   });
   const [reports, setReports] = useState<Report[]>([]);
+  const [outstandingMonthlyReports, setOutstandingMonthlyReports] = useState<OutstandingMonthlyReport[]>([]);
   const [outstandingBalances, setOutstandingBalances] = useState<OutstandingBalance[]>([]);
   const [isLoading, setIsLoading] = useState(() => {
     try {
@@ -383,11 +413,12 @@ export default function App() {
   const [editingLoan, setEditingLoan] = useState<Loan | null>(null);
   const [editingSaving, setEditingSaving] = useState<Saving | null>(null);
   const [editingReport, setEditingReport] = useState<Report | null>(null);
+  const [editingOutstandingMonthlyReport, setEditingOutstandingMonthlyReport] = useState<OutstandingMonthlyReport | null>(null);
   const [editingOutstanding, setEditingOutstanding] = useState<OutstandingBalance | null>(null);
   const [filters, setFilters] = useState({ year: '', month: '', account_no: '', filterType: '' });
   const [formKey, setFormKey] = useState(Date.now());
-  const [activeAdminTab, setActiveAdminTab] = useState<'loans' | 'general_savings' | 'monthly_savings' | 'reports' | 'outstanding' | 'settings'>('loans');
-  const [adminFormType, setAdminFormType] = useState<'loan' | 'general_saving' | 'monthly_saving' | 'report' | 'outstanding' | null>(null);
+  const [activeAdminTab, setActiveAdminTab] = useState<'loans' | 'general_savings' | 'monthly_savings' | 'reports' | 'outstanding' | 'outstanding_monthly' | 'settings'>('loans');
+  const [adminFormType, setAdminFormType] = useState<'loan' | 'general_saving' | 'monthly_saving' | 'report' | 'outstanding' | 'outstanding_monthly' | null>(null);
 
   const societyInfo = {
     name: "ইনসাফ সঞ্চয়-ঋণদান সমবায় সমিতি লিমিটেড",
@@ -543,11 +574,22 @@ export default function App() {
       setOutstandingBalances(data);
     });
 
+    const monthlyReportsQuery = query(collection(db, 'outstanding_monthly_reports'), orderBy('year', 'desc'));
+    const unsubscribeMonthlyReports = onSnapshot(monthlyReportsQuery, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as OutstandingMonthlyReport));
+      data.sort((a, b) => {
+        if (b.year !== a.year) return Number(b.year) - Number(a.year);
+        return Number(b.month) - Number(a.month);
+      });
+      setOutstandingMonthlyReports(data);
+    });
+
     return () => {
       unsubscribeLoans();
       unsubscribeSavings();
       unsubscribeReports();
       unsubscribeOutstanding();
+      unsubscribeMonthlyReports();
     };
   }, [filters, currentView, isLoggedIn, activeAdminTab]);
 
@@ -691,6 +733,59 @@ export default function App() {
     }
   };
 
+  const handleSaveOutstandingMonthlyReport = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    const data = Object.fromEntries(formData.entries());
+    
+    const numericFields = [
+      'last_month_outstanding', 'current_month_investment', 'total_last_plus_investment',
+      'current_month_collection', 'should_be_in_field', 'actually_in_field', 'difference'
+    ];
+    
+    const reportData: any = {
+      month: data.month,
+      year: data.year,
+      updated_at: serverTimestamp(),
+      created_at: editingOutstandingMonthlyReport ? editingOutstandingMonthlyReport.created_at : serverTimestamp()
+    };
+    
+    numericFields.forEach(field => {
+      reportData[field] = parseFloat((data[field] as string).replace(/,/g, '')) || 0;
+    });
+    
+    try {
+      if (editingOutstandingMonthlyReport) {
+        await updateDoc(doc(db, 'outstanding_monthly_reports', editingOutstandingMonthlyReport.id), reportData);
+        alert('প্রতিবেদন সফলভাবে আপডেট করা হয়েছে');
+      } else {
+        await addDoc(collection(db, 'outstanding_monthly_reports'), reportData);
+        alert('প্রতিবেদন সফলভাবে সংরক্ষণ করা হয়েছে');
+      }
+      setEditingOutstandingMonthlyReport(null);
+      setShowForm(false);
+      setFormKey(Date.now());
+    } catch (error: any) {
+      console.error("Error saving monthly report:", error);
+      alert('সংরক্ষণ করতে সমস্যা হয়েছে');
+    }
+  };
+
+  const handleDeleteOutstandingMonthlyReport = async (id: string) => {
+    if (!id) return;
+    if (!window.confirm('আপনি কি নিশ্চিত যে আপনি এই প্রতিবেদনটি মুছে ফেলতে চান?')) return;
+    setDeletingId(id);
+    try {
+      await deleteDoc(doc(db, 'outstanding_monthly_reports', id));
+      alert('সফলভাবে মুছে ফেলা হয়েছে');
+    } catch (error: any) {
+      console.error("Error deleting monthly report:", error);
+      alert('মুছে ফেলতে সমস্যা হয়েছে');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const handleDeleteLoan = async (id: string) => {
     if (!id) {
       alert('ভুল আইডি');
@@ -830,85 +925,11 @@ export default function App() {
     const latestOutstanding = outstandingBalances[0];
     const outstandingDate = latestOutstanding?.date ? new Date(latestOutstanding.date) : null;
     const outstandingLabel = outstandingDate 
-      ? `${toBengaliNumber(outstandingDate.getDate())} ${months.find(m => m.value === (outstandingDate.getMonth() + 1).toString().padStart(2, '0'))?.label} বকেয়া মাঠে আছে`
-      : 'বকেয়া মাঠে আছে';
+      ? `মাঠে বকেয়া আছে (${months.find(m => m.value === (outstandingDate.getMonth() + 1).toString().padStart(2, '0'))?.label})`
+      : 'মাঠে বকেয়া আছে';
 
     return (
       <div className="space-y-8">
-        {/* Latest Investments Section */}
-        <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-3">
-              <div className="bg-orange-100 p-2 rounded-lg text-orange-700">
-                <HandCoins size={20} />
-              </div>
-              <h2 className="text-xl font-bold text-gray-800">সর্বশেষ প্রদান কৃত বিনিয়োগ</h2>
-            </div>
-            <button 
-              onClick={() => setCurrentView('loans')}
-              className="text-emerald-600 text-sm font-bold hover:underline"
-            >
-              সব দেখুন
-            </button>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {latestLoans.length > 0 ? latestLoans.map(loan => (
-              <div key={loan.id} className="flex items-center justify-between p-4 rounded-2xl bg-gray-50 border border-gray-100">
-                <div>
-                  <p className="font-bold text-gray-800">{loan.customer_name}</p>
-                  <p className="text-xs text-gray-500">একাউন্ট: {toBengaliNumber(loan.account_no)} | তারিখ: {formatDate(loan.start_date)}</p>
-                </div>
-                <div className="text-right">
-                  <p className="font-bold text-emerald-700">{formatCurrency(loan.amount)}</p>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                    (loan.status || 'চলমান') === 'চলমান' ? 'bg-orange-100 text-orange-700' : 'bg-emerald-100 text-emerald-700'
-                  }`}>
-                    {loan.status || 'চলমান'}
-                  </span>
-                </div>
-              </div>
-            )) : (
-              <div className="col-span-full text-center py-10 text-gray-400 italic text-sm">
-                কোন বিনিয়োগ তথ্য পাওয়া যায়নি
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Monthly Report Quick View */}
-        <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-3">
-              <div className="bg-blue-100 p-2 rounded-lg text-blue-700">
-                <Search size={20} />
-              </div>
-              <h2 className="text-xl font-bold text-gray-800">মাসিক রিপোর্ট</h2>
-            </div>
-          </div>
-          
-          {reports.length > 0 ? (
-            <div className="p-6 rounded-2xl bg-blue-50 border border-blue-100 flex flex-col md:flex-row justify-between items-center gap-4">
-              <div>
-                <p className="text-blue-800 font-bold text-lg">
-                  {months.find(m => m.value === reports[0].month)?.label} - {toBengaliNumber(reports[0].year)}
-                </p>
-                <p className="text-sm text-blue-600">সর্বশেষ মাসিক রিপোর্ট</p>
-              </div>
-              <button 
-                onClick={() => setCurrentView('reports')}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-xl font-bold transition-colors shadow-sm"
-              >
-                রিপোর্ট দেখুন
-              </button>
-            </div>
-          ) : (
-            <div className="text-center py-6 text-gray-400 italic text-sm">
-              কোন রিপোর্ট পাওয়া যায়নি
-            </div>
-          )}
-        </div>
-
         {/* Outstanding Balance Section */}
         {latestOutstanding && (
           <button 
@@ -927,7 +948,6 @@ export default function App() {
             </div>
           </button>
         )}
-
 
         {/* Society Info Section */}
         <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
@@ -964,6 +984,283 @@ export default function App() {
     );
   };
 
+  const OutstandingMonthlyReportView = ({ reports, societyInfo }: { reports: OutstandingMonthlyReport[], societyInfo: any }) => {
+    const [filters, setFilters] = useState({ year: '', month: '' });
+
+    useEffect(() => {
+      if (reports.length > 0 && !filters.year && !filters.month) {
+        const latest = [...reports].sort((a, b) => {
+          if (a.year !== b.year) return b.year.localeCompare(a.year);
+          return b.month.localeCompare(a.month);
+        })[0];
+        setFilters({ year: latest.year, month: latest.month });
+      }
+    }, [reports]);
+
+    const filteredReports = reports.filter(r => 
+      (!filters.year || r.year === filters.year) && 
+      (!filters.month || r.month === filters.month)
+    );
+
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+            <FileText className="text-emerald-600" />
+            বকেয়া মাসিক প্রতিবেদন
+          </h2>
+        </div>
+
+        <div className="flex flex-wrap gap-4 mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+          <div className="flex-1 min-w-[150px]">
+            <label className="block text-xs font-bold text-gray-400 uppercase mb-1">বছর</label>
+            <select 
+              value={filters.year} 
+              onChange={(e) => setFilters(prev => ({ ...prev, year: e.target.value }))}
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
+            >
+              <option value="">সব বছর</option>
+              {years.map(y => <option key={y} value={y}>{toBengaliNumber(y)}</option>)}
+            </select>
+          </div>
+          <div className="flex-1 min-w-[150px]">
+            <label className="block text-xs font-bold text-gray-400 uppercase mb-1">মাস</label>
+            <select 
+              value={filters.month} 
+              onChange={(e) => setFilters(prev => ({ ...prev, month: e.target.value }))}
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
+            >
+              {months.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {filteredReports.length > 0 ? (
+          filteredReports.map(report => (
+            <div key={report.id} className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 overflow-hidden print:shadow-none print:border-none">
+              <ExcelHeader 
+                title="মাসিক বকেয়া ব্যালেন্স প্রতিবেদন" 
+                societyInfo={societyInfo} 
+                subtitle={`${months.find(m => m.value === report.month)?.label} - ${toBengaliNumber(report.year)}`}
+              />
+              
+              <div className="mt-8 space-y-4 max-w-2xl mx-auto">
+                <div className="flex justify-between items-center border-b border-gray-100 pb-2">
+                  <span className="text-gray-600">গতমাসে বকেয়া মাঠে ছিলো:</span>
+                  <span className="font-bold text-lg">{formatCurrency(report.last_month_outstanding)}</span>
+                </div>
+                <div className="flex justify-between items-center border-b border-gray-100 pb-2">
+                  <span className="text-gray-600">চলতি মাসে বিনিয়োগ প্রদান:</span>
+                  <span className="font-bold text-lg">{formatCurrency(report.current_month_investment)}</span>
+                </div>
+                <div className="flex justify-between items-center bg-gray-50 p-3 rounded-xl border border-gray-100">
+                  <span className="text-emerald-700 font-bold">গতমাসের বকেয়া + চলতি মাসের বিনিয়োগ:</span>
+                  <span className="font-bold text-xl text-emerald-800">{formatCurrency(report.total_last_plus_investment)}</span>
+                </div>
+                <div className="flex justify-between items-center border-b border-gray-100 pb-2">
+                  <span className="text-gray-600">চলতি মাসে কিস্তি আদায়:</span>
+                  <span className="font-bold text-lg text-red-600">(-) {formatCurrency(report.current_month_collection)}</span>
+                </div>
+                <div className="flex justify-between items-center bg-emerald-50 p-3 rounded-xl border border-emerald-100">
+                  <span className="text-emerald-700 font-bold">চলতি মাসে মাঠে বকেয়া থাকার কথা:</span>
+                  <span className="font-bold text-xl text-emerald-800">{formatCurrency(report.should_be_in_field)}</span>
+                </div>
+                <div className="flex justify-between items-center border-b border-gray-100 pb-2">
+                  <span className="text-gray-600">বর্তমানে মাঠে বকেয়া আছে:</span>
+                  <span className="font-bold text-lg">{formatCurrency(report.actually_in_field)}</span>
+                </div>
+                <div className={`flex justify-between items-center p-3 rounded-xl border ${report.difference === 0 ? 'bg-blue-50 border-blue-100' : 'bg-red-50 border-red-100'}`}>
+                  <span className={`${report.difference === 0 ? 'text-blue-700' : 'text-red-700'} font-bold`}>পার্থক্য:</span>
+                  <span className={`font-bold text-xl ${report.difference === 0 ? 'text-blue-800' : 'text-red-800'}`}>{formatCurrency(report.difference)}</span>
+                </div>
+              </div>
+              
+              <div className="mt-12 flex justify-between px-10 pt-10 border-t border-gray-100">
+                <div className="text-center">
+                  <div className="w-32 border-t border-gray-400 mb-1 mx-auto"></div>
+                  <p className="text-xs font-bold text-gray-500">ক্যাশিয়ার</p>
+                </div>
+                <div className="text-center">
+                  <div className="w-32 border-t border-gray-400 mb-1 mx-auto"></div>
+                  <p className="text-xs font-bold text-gray-500">ম্যানেজার</p>
+                </div>
+                <div className="text-center">
+                  <div className="w-32 border-t border-gray-400 mb-1 mx-auto"></div>
+                  <p className="text-xs font-bold text-gray-500">সভাপতি</p>
+                </div>
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="bg-white p-12 rounded-3xl shadow-sm border border-gray-100 text-center">
+            <FileText size={48} className="mx-auto text-gray-200 mb-4" />
+            <p className="text-gray-400 italic">এই মাসের কোন প্রতিবেদন পাওয়া যায়নি</p>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const OutstandingMonthlyReportForm = ({ 
+    editingReport, 
+    onSave, 
+    onCancel, 
+    formKey,
+    outstandingBalances,
+    loans,
+    reports
+  }: { 
+    editingReport: OutstandingMonthlyReport | null, 
+    onSave: (e: React.FormEvent<HTMLFormElement>) => void, 
+    onCancel: () => void,
+    formKey: number,
+    outstandingBalances: OutstandingBalance[],
+    loans: Loan[],
+    reports: Report[]
+  }) => {
+    const [month, setMonth] = useState(editingReport?.month || (new Date().getMonth() + 1).toString().padStart(2, '0'));
+    const [year, setYear] = useState(editingReport?.year || new Date().getFullYear().toString());
+    
+    const [lastMonthOutstanding, setLastMonthOutstanding] = useState(editingReport?.last_month_outstanding || 0);
+    const [currentMonthInvestment, setCurrentMonthInvestment] = useState(editingReport?.current_month_investment || 0);
+    const [currentMonthCollection, setCurrentMonthCollection] = useState(editingReport?.current_month_collection || 0);
+    const [actuallyInField, setActuallyInField] = useState(editingReport?.actually_in_field || 0);
+
+    useEffect(() => {
+      if (editingReport) return;
+
+      // Auto-fetch values
+      const prevMonth = Number(month) === 1 ? 12 : Number(month) - 1;
+      const prevYear = Number(month) === 1 ? Number(year) - 1 : Number(year);
+      const prevMonthStr = prevMonth.toString().padStart(2, '0');
+      
+      // Last month outstanding
+      const lastMonthData = outstandingBalances.find(ob => {
+        const d = new Date(ob.date);
+        return (d.getMonth() + 1).toString().padStart(2, '0') === prevMonthStr && d.getFullYear().toString() === prevYear.toString();
+      });
+      setLastMonthOutstanding(lastMonthData?.amount || 0);
+
+      // Current month investment
+      const currentMonthLoans = loans.filter(l => {
+        const d = new Date(l.start_date);
+        return (d.getMonth() + 1).toString().padStart(2, '0') === month && d.getFullYear().toString() === year;
+      });
+      setCurrentMonthInvestment(currentMonthLoans.reduce((acc, l) => acc + (l.total_with_profit || l.amount), 0));
+
+      // Current month collection
+      const currentMonthReport = reports.find(r => r.month === month && r.year === year);
+      setCurrentMonthCollection(currentMonthReport?.total_installment_coll || 0);
+
+      // Actually in field
+      const currentMonthOutstanding = outstandingBalances.find(ob => {
+        const d = new Date(ob.date);
+        return (d.getMonth() + 1).toString().padStart(2, '0') === month && d.getFullYear().toString() === year;
+      });
+      setActuallyInField(currentMonthOutstanding?.amount || 0);
+
+    }, [month, year, outstandingBalances, loans, reports, editingReport]);
+
+    const totalLastPlusInvestment = lastMonthOutstanding + currentMonthInvestment;
+    const shouldBeInField = totalLastPlusInvestment - currentMonthCollection;
+    const difference = shouldBeInField - actuallyInField;
+
+    return (
+      <form key={formKey} onSubmit={onSave} className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">মাস</label>
+            <select 
+              name="month"
+              value={month}
+              onChange={(e) => setMonth(e.target.value)}
+              className="w-full px-4 py-2 rounded-lg border border-gray-200 outline-none focus:ring-2 focus:ring-emerald-500"
+            >
+              {months.filter(m => m.value !== '').map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">বছর</label>
+            <input 
+              type="number" 
+              name="year"
+              value={year}
+              onChange={(e) => setYear(e.target.value)}
+              className="w-full px-4 py-2 rounded-lg border border-gray-200 outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+          
+          <CurrencyInput 
+            label="গতমাসে বকেয়া মাঠে ছিলো" 
+            name="last_month_outstanding" 
+            value={lastMonthOutstanding.toString()}
+            onChange={(val) => setLastMonthOutstanding(parseFloat(val) || 0)}
+          />
+          <CurrencyInput 
+            label="চলতি মাসে বিনিয়োগ প্রদান" 
+            name="current_month_investment" 
+            value={currentMonthInvestment.toString()}
+            onChange={(val) => setCurrentMonthInvestment(parseFloat(val) || 0)}
+          />
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">গতমাসের বকেয়া + চলতি মাসের বিনিয়োগ</label>
+            <input 
+              type="text" 
+              readOnly
+              value={formatCurrency(totalLastPlusInvestment)}
+              className="w-full px-4 py-2 rounded-lg border border-gray-200 bg-gray-50 font-bold"
+            />
+            <input type="hidden" name="total_last_plus_investment" value={totalLastPlusInvestment} />
+          </div>
+
+          <CurrencyInput 
+            label="চলতি মাসে কিস্তি আদায়" 
+            name="current_month_collection" 
+            value={currentMonthCollection.toString()}
+            onChange={(val) => setCurrentMonthCollection(parseFloat(val) || 0)}
+          />
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">চলতি মাসে মাঠে বকেয়া থাকার কথা</label>
+            <input 
+              type="text" 
+              readOnly
+              value={formatCurrency(shouldBeInField)}
+              className="w-full px-4 py-2 rounded-lg border border-gray-200 bg-gray-50 font-bold"
+            />
+            <input type="hidden" name="should_be_in_field" value={shouldBeInField} />
+          </div>
+
+          <CurrencyInput 
+            label="বর্তমানে মাঠে বকেয়া আছে" 
+            name="actually_in_field" 
+            value={actuallyInField.toString()}
+            onChange={(val) => setActuallyInField(parseFloat(val) || 0)}
+          />
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">পার্থক্য</label>
+            <input 
+              type="text" 
+              readOnly
+              value={formatCurrency(difference)}
+              className={`w-full px-4 py-2 rounded-lg border border-gray-200 bg-gray-50 font-bold ${difference !== 0 ? 'text-red-600' : 'text-blue-600'}`}
+            />
+            <input type="hidden" name="difference" value={difference} />
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-3 pt-4">
+          <button type="button" onClick={onCancel} className="px-6 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">বাতিল</button>
+          <button type="submit" className="px-6 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-sm">
+            {editingReport ? 'আপডেট করুন' : 'সংরক্ষণ করুন'}
+          </button>
+        </div>
+      </form>
+    );
+  };
+
   const renderLoans = () => (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -980,18 +1277,18 @@ export default function App() {
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         <ExcelHeader title="বিনিয়োগ তালিকা" societyInfo={societyInfo} />
         
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6 bg-emerald-50 p-4 rounded-xl border border-emerald-100 divide-y sm:divide-y-0 sm:divide-x divide-emerald-200">
-          <div className="text-center py-2 sm:py-0">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6 bg-emerald-50 p-4 rounded-xl border border-emerald-100">
+          <div className="text-center py-2 border-b sm:border-b-0 sm:border-r border-emerald-200">
             <p className="text-xs text-emerald-600 font-bold uppercase">মোট বিনিয়োগ সংখ্যা</p>
             <p className="text-xl font-bold text-emerald-800">{toBengaliNumber(loans.length)}</p>
           </div>
-          <div className="text-center py-2 sm:py-0">
+          <div className="text-center py-2 border-b sm:border-b-0 sm:border-r border-emerald-200">
             <p className="text-xs text-emerald-600 font-bold uppercase">মোট বিনিয়োগ পরিমাণ</p>
-            <p className="text-xl font-bold text-emerald-800">{formatCurrency(loans.reduce((acc, l) => acc + l.amount, 0))}</p>
+            <p className="text-xl font-bold text-emerald-800 break-all px-2">{formatCurrency(loans.reduce((acc, l) => acc + l.amount, 0))}</p>
           </div>
-          <div className="text-center py-2 sm:py-0">
+          <div className="text-center py-2">
             <p className="text-xs text-emerald-600 font-bold uppercase">মুনাফাসহ মোট</p>
-            <p className="text-xl font-bold text-emerald-800">{formatCurrency(loans.reduce((acc, l) => acc + l.total_with_profit, 0))}</p>
+            <p className="text-xl font-bold text-emerald-800 break-all px-2">{formatCurrency(loans.reduce((acc, l) => acc + l.total_with_profit, 0))}</p>
           </div>
         </div>
 
@@ -1347,20 +1644,6 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="bg-amber-50 p-6 rounded-2xl border border-amber-100">
-                  <h4 className="font-bold text-amber-800 border-b border-amber-200 pb-2 mb-4">ব্যাংক লেনদেন</h4>
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-center py-2 border-b border-amber-100 last:border-0">
-                      <span className="text-gray-600">ব্যাংক জমা</span>
-                      <span className="font-bold text-amber-700">{formatCurrency(selectedReport.bank_deposit)}</span>
-                    </div>
-                    <div className="flex justify-between items-center py-2 border-b border-amber-100 last:border-0">
-                      <span className="text-gray-600">ব্যাংক উত্তোলন</span>
-                      <span className="font-bold text-amber-700">{formatCurrency(selectedReport.bank_withdrawal)}</span>
-                    </div>
-                  </div>
-                </div>
-
                 <div className="bg-gray-800 p-6 rounded-2xl shadow-lg text-white">
                   <h4 className="font-bold text-emerald-400 border-b border-gray-700 pb-2 mb-4">সমাপনী স্থিতি</h4>
                   <div className="space-y-4">
@@ -1396,6 +1679,20 @@ export default function App() {
                           Number(selectedReport.bank_withdrawal)
                         )}
                       </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-amber-50 p-6 rounded-2xl border border-amber-100">
+                  <h4 className="font-bold text-amber-800 border-b border-amber-200 pb-2 mb-4">ব্যাংক লেনদেন</h4>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center py-2 border-b border-amber-100 last:border-0">
+                      <span className="text-gray-600">ব্যাংক জমা</span>
+                      <span className="font-bold text-amber-700">{formatCurrency(selectedReport.bank_deposit)}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-2 border-b border-amber-100 last:border-0">
+                      <span className="text-gray-600">ব্যাংক উত্তোলন</span>
+                      <span className="font-bold text-amber-700">{formatCurrency(selectedReport.bank_withdrawal)}</span>
                     </div>
                   </div>
                 </div>
@@ -1587,6 +1884,12 @@ export default function App() {
           >
             <Plus size={16} /> বকেয়া
           </button>
+          <button 
+            onClick={() => { setEditingOutstandingMonthlyReport(null); setAdminFormType('outstanding_monthly'); setFormKey(Date.now()); setShowForm(true); }}
+            className="bg-emerald-700 hover:bg-emerald-800 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors shadow-sm"
+          >
+            <Plus size={16} /> বকেয়া প্রতিবেদন
+          </button>
         </div>
       </div>
 
@@ -1625,6 +1928,12 @@ export default function App() {
           className={`px-6 py-3 text-sm font-bold transition-colors border-b-2 ${activeAdminTab === 'outstanding' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
         >
           বকেয়া স্থিতি ব্যবস্থাপনা
+        </button>
+        <button 
+          onClick={() => setActiveAdminTab('outstanding_monthly')}
+          className={`px-6 py-3 text-sm font-bold transition-colors border-b-2 ${activeAdminTab === 'outstanding_monthly' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
+        >
+          বকেয়া মাসিক প্রতিবেদন ব্যবস্থাপনা
         </button>
         <button 
           onClick={() => setActiveAdminTab('settings')}
@@ -2025,6 +2334,7 @@ export default function App() {
           <NavItem active={currentView === 'monthly_savings'} icon={CalendarClock} label="মাসিক সঞ্চয় (ডিপিএস) প্রদান" onClick={() => setCurrentView('monthly_savings')} />
           <NavItem active={currentView === 'reports'} icon={Search} label="মাসিক রিপোর্ট" onClick={() => setCurrentView('reports')} />
           <NavItem active={currentView === 'outstanding_list'} icon={HandCoins} label="বকেয়া মাঠে আছে" onClick={() => setCurrentView('outstanding_list')} />
+          <NavItem active={currentView === 'outstanding_monthly_report'} icon={FileText} label="বকেয়া মাসিক প্রতিবেদন" onClick={() => setCurrentView('outstanding_monthly_report')} />
           <NavItem active={currentView === 'admin' || currentView === 'login'} icon={Filter} label="এডমিন প্যানেল" onClick={() => {
             if (isLoggedIn) setCurrentView('admin');
             else setCurrentView('login');
@@ -2070,6 +2380,7 @@ export default function App() {
             <NavItem active={currentView === 'monthly_savings'} icon={CalendarClock} label="মাসিক সঞ্চয় (ডিপিএস) প্রদান" onClick={() => { setCurrentView('monthly_savings'); setIsMobileMenuOpen(false); }} />
             <NavItem active={currentView === 'reports'} icon={Search} label="মাসিক রিপোর্ট" onClick={() => { setCurrentView('reports'); setIsMobileMenuOpen(false); }} />
             <NavItem active={currentView === 'outstanding_list'} icon={HandCoins} label="বকেয়া মাঠে আছে" onClick={() => { setCurrentView('outstanding_list'); setIsMobileMenuOpen(false); }} />
+            <NavItem active={currentView === 'outstanding_monthly_report'} icon={FileText} label="বকেয়া মাসিক প্রতিবেদন" onClick={() => { setCurrentView('outstanding_monthly_report'); setIsMobileMenuOpen(false); }} />
             <NavItem active={currentView === 'admin' || currentView === 'login'} icon={Filter} label="এডমিন প্যানেল" onClick={() => { 
               if (isLoggedIn) setCurrentView('admin');
               else setCurrentView('login');
@@ -2105,6 +2416,7 @@ export default function App() {
             {currentView === 'monthly_savings' && renderSavings('monthly')}
             {currentView === 'reports' && <ReportsView />}
             {currentView === 'outstanding_list' && <OutstandingListView />}
+            {currentView === 'outstanding_monthly_report' && <OutstandingMonthlyReportView reports={outstandingMonthlyReports} societyInfo={societyInfo} />}
             {currentView === 'admin' && isLoggedIn && renderAdmin()}
             {currentView === 'login' && !isLoggedIn && (
               <div className="max-w-md mx-auto mt-10 bg-white p-8 rounded-3xl shadow-xl border border-gray-100">
@@ -2155,7 +2467,8 @@ export default function App() {
                   adminFormType === 'loan' ? 'bg-emerald-600' : 
                   adminFormType === 'general_saving' ? 'bg-blue-600' : 
                   adminFormType === 'monthly_saving' ? 'bg-purple-600' :
-                  adminFormType === 'report' ? 'bg-orange-600' : 'bg-gray-600'
+                  adminFormType === 'report' ? 'bg-orange-600' : 
+                  adminFormType === 'outstanding_monthly' ? 'bg-emerald-700' : 'bg-gray-600'
                 ) : (
                   currentView === 'loans' ? 'bg-emerald-600' : 
                   currentView === 'general_savings' ? 'bg-blue-600' : 'bg-purple-600'
@@ -2167,13 +2480,14 @@ export default function App() {
                     adminFormType === 'loan' ? 'নতুন বিনিয়োগ ফর্ম' : 
                     adminFormType === 'general_saving' ? 'সাধারণ সঞ্চয় ফর্ম' : 
                     adminFormType === 'monthly_saving' ? 'মাসিক সঞ্চয় (ডিপিএস) ফর্ম' :
-                    adminFormType === 'report' ? 'মাসিক রিপোর্ট ফর্ম' : 'বকেয়া স্থিতি ফর্ম'
+                    adminFormType === 'report' ? 'মাসিক রিপোর্ট ফর্ম' : 
+                    adminFormType === 'outstanding_monthly' ? 'বকেয়া মাসিক প্রতিবেদন ফর্ম' : 'বকেয়া স্থিতি ফর্ম'
                   ) : (
                     currentView === 'loans' ? 'নতুন বিনিয়োগ ফর্ম' : 
                     currentView === 'general_savings' ? 'সাধারণ সঞ্চয় ফর্ম' : 'মাসিক সঞ্চয় (ডিপিএস) ফর্ম'
                   )}
                 </h3>
-                <button onClick={() => { setShowForm(false); setEditingLoan(null); setEditingSaving(null); setEditingReport(null); setEditingOutstanding(null); }} className="hover:bg-white/20 p-1 rounded-lg transition-colors">
+                <button onClick={() => { setShowForm(false); setEditingLoan(null); setEditingSaving(null); setEditingReport(null); setEditingOutstanding(null); setEditingOutstandingMonthlyReport(null); }} className="hover:bg-white/20 p-1 rounded-lg transition-colors">
                   <X size={24} />
                 </button>
               </div>
@@ -2189,6 +2503,16 @@ export default function App() {
                       onSave={handleSaveReport} 
                       onCancel={() => { setShowForm(false); setEditingReport(null); }} 
                       formKey={formKey}
+                    />
+                  ) : adminFormType === 'outstanding_monthly' ? (
+                    <OutstandingMonthlyReportForm 
+                      editingReport={editingOutstandingMonthlyReport}
+                      onSave={handleSaveOutstandingMonthlyReport}
+                      onCancel={() => { setShowForm(false); setEditingOutstandingMonthlyReport(null); }}
+                      formKey={formKey}
+                      outstandingBalances={outstandingBalances}
+                      loans={loans}
+                      reports={reports}
                     />
                   ) : renderOutstandingBalanceForm()
                 ) : (
