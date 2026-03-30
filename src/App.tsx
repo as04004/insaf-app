@@ -930,6 +930,43 @@ export default function App() {
 
     return (
       <div className="space-y-8">
+        {/* Latest Investment Section */}
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="bg-emerald-100 p-2 rounded-lg text-emerald-700">
+                <HandCoins size={20} />
+              </div>
+              <h2 className="text-xl font-bold text-gray-800">সর্বশেষ বিনিয়োগ</h2>
+            </div>
+            <button 
+              onClick={() => setCurrentView('loans')}
+              className="text-emerald-600 hover:text-emerald-700 font-bold text-sm flex items-center gap-1 transition-colors"
+            >
+              সব দেখুন <ChevronRight size={16} />
+            </button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {latestLoans.map(loan => (
+              <div key={loan.id} className="p-4 rounded-2xl border border-gray-50 bg-gray-50/50 hover:bg-emerald-50 transition-colors">
+                <div className="flex justify-between items-start mb-2">
+                  <p className="font-bold text-gray-800">{loan.customer_name}</p>
+                  <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold">
+                    {loan.status}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-gray-500">একাউন্ট: {toBengaliNumber(loan.account_no)}</span>
+                  <span className="font-bold text-emerald-700">{formatCurrency(loan.amount)}</span>
+                </div>
+              </div>
+            ))}
+            {latestLoans.length === 0 && (
+              <p className="text-gray-400 italic text-center py-4 col-span-2">কোন বিনিয়োগ তথ্য পাওয়া যায়নি</p>
+            )}
+          </div>
+        </div>
+
         {/* Outstanding Balance Section */}
         {latestOutstanding && (
           <button 
@@ -1059,7 +1096,7 @@ export default function App() {
                 </div>
                 <div className="flex justify-between items-center border-b border-gray-100 pb-2">
                   <span className="text-gray-600">চলতি মাসে কিস্তি আদায়:</span>
-                  <span className="font-bold text-lg text-red-600">(-) {formatCurrency(report.current_month_collection)}</span>
+                  <span className="font-bold text-lg text-red-600">{formatCurrency(report.current_month_collection)}</span>
                 </div>
                 <div className="flex justify-between items-center bg-emerald-50 p-3 rounded-xl border border-emerald-100">
                   <span className="text-emerald-700 font-bold">চলতি মাসে মাঠে বকেয়া থাকার কথা:</span>
@@ -1419,6 +1456,14 @@ export default function App() {
     const [filterMonth, setFilterMonth] = useState('');
     const [filterYear, setFilterYear] = useState('');
 
+    useEffect(() => {
+      if (outstandingBalances.length > 0 && !filterMonth && !filterYear) {
+        const latest = new Date(outstandingBalances[0].date);
+        setFilterMonth((latest.getMonth() + 1).toString().padStart(2, '0'));
+        setFilterYear(latest.getFullYear().toString());
+      }
+    }, [outstandingBalances]);
+
     const filteredBalances = outstandingBalances.filter(item => {
       const date = new Date(item.date);
       const monthMatch = filterMonth === '' || (date.getMonth() + 1).toString().padStart(2, '0') === filterMonth;
@@ -1644,6 +1689,20 @@ export default function App() {
                   </div>
                 </div>
 
+                <div className="bg-amber-50 p-6 rounded-2xl border border-amber-100">
+                  <h4 className="font-bold text-amber-800 border-b border-amber-200 pb-2 mb-4">ব্যাংক লেনদেন</h4>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center py-2 border-b border-amber-100 last:border-0">
+                      <span className="text-gray-600">ব্যাংক জমা</span>
+                      <span className="font-bold text-amber-700">{formatCurrency(selectedReport.bank_deposit)}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-2 border-b border-amber-100 last:border-0">
+                      <span className="text-gray-600">ব্যাংক উত্তোলন</span>
+                      <span className="font-bold text-amber-700">{formatCurrency(selectedReport.bank_withdrawal)}</span>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="bg-gray-800 p-6 rounded-2xl shadow-lg text-white">
                   <h4 className="font-bold text-emerald-400 border-b border-gray-700 pb-2 mb-4">সমাপনী স্থিতি</h4>
                   <div className="space-y-4">
@@ -1679,20 +1738,6 @@ export default function App() {
                           Number(selectedReport.bank_withdrawal)
                         )}
                       </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-amber-50 p-6 rounded-2xl border border-amber-100">
-                  <h4 className="font-bold text-amber-800 border-b border-amber-200 pb-2 mb-4">ব্যাংক লেনদেন</h4>
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-center py-2 border-b border-amber-100 last:border-0">
-                      <span className="text-gray-600">ব্যাংক জমা</span>
-                      <span className="font-bold text-amber-700">{formatCurrency(selectedReport.bank_deposit)}</span>
-                    </div>
-                    <div className="flex justify-between items-center py-2 border-b border-amber-100 last:border-0">
-                      <span className="text-gray-600">ব্যাংক উত্তোলন</span>
-                      <span className="font-bold text-amber-700">{formatCurrency(selectedReport.bank_withdrawal)}</span>
                     </div>
                   </div>
                 </div>
@@ -2162,6 +2207,51 @@ export default function App() {
                 )) : (
                   <tr>
                     <td colSpan={3} className="border border-gray-300 p-8 text-center text-gray-400 italic">কোন তথ্য পাওয়া যায়নি</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {activeAdminTab === 'outstanding_monthly' && (
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse border border-gray-300 text-xs">
+              <thead>
+                <tr className="bg-gray-50">
+                  <th className="border border-gray-300 p-2">মাস</th>
+                  <th className="border border-gray-300 p-2">বছর</th>
+                  <th className="border border-gray-300 p-2">মাঠে বকেয়া</th>
+                  <th className="border border-gray-300 p-2">অ্যাকশন</th>
+                </tr>
+              </thead>
+              <tbody>
+                {outstandingMonthlyReports.map(report => (
+                  <tr key={report.id} className="hover:bg-gray-50">
+                    <td className="border border-gray-300 p-2 text-center">{months.find(m => m.value === report.month)?.label}</td>
+                    <td className="border border-gray-300 p-2 text-center">{toBengaliNumber(report.year)}</td>
+                    <td className="border border-gray-300 p-2 text-right font-bold">{formatCurrency(report.actually_in_field)}</td>
+                    <td className="border border-gray-300 p-2 text-center">
+                      <div className="flex items-center justify-center gap-2">
+                        <button 
+                          onClick={() => { setEditingOutstandingMonthlyReport(report); setAdminFormType('outstanding_monthly'); setFormKey(Date.now()); setShowForm(true); }}
+                          className="text-blue-600 hover:text-blue-800 font-bold"
+                        >
+                          এডিট
+                        </button>
+                        <button 
+                          onClick={() => handleDeleteOutstandingMonthlyReport(report.id)}
+                          className="text-red-600 hover:text-red-800 font-bold"
+                        >
+                          মুছুন
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {outstandingMonthlyReports.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="border border-gray-300 p-8 text-center text-gray-400 italic">কোন প্রতিবেদন পাওয়া যায়নি</td>
                   </tr>
                 )}
               </tbody>
