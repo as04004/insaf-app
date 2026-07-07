@@ -1,0 +1,73 @@
+@import url('https://fonts.maateen.me/solaiman-lipi/font.css');
+@import "tailwindcss";
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .desktop-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .desktop-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  @media (min-width: 768px) {
+    .desktop-scrollbar::-webkit-scrollbar {
+      display: block;
+      height: 6px;
+    }
+    .desktop-scrollbar::-webkit-scrollbar-track {
+      background: #f1f1f1;
+      border-radius: 10px;
+    }
+    .desktop-scrollbar::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 10px;
+    }
+    .desktop-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+    .desktop-scrollbar {
+      -ms-overflow-style: auto;
+      scrollbar-width: thin;
+    }
+  }
+  .pt-safe {
+    padding-top: env(safe-area-inset-top);
+  }
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .pl-safe {
+    padding-left: env(safe-area-inset-left);
+  }
+  .pr-safe {
+    padding-right: env(safe-area-inset-right);
+  }
+}
+
+@theme {
+  --font-sans: "SolaimanLipi", "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  @apply bg-gray-50 text-gray-900;
+}
+
+/* Custom scrollbar for a cleaner look */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-200 rounded-full hover:bg-gray-300 transition-colors;
+}
