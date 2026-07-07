@@ -4042,7 +4042,7 @@ export default function App() {
           <span className="font-bold text-xl text-emerald-800 leading-tight">ইনসাফ সমবায় সমিতি</span>
         </div>
         
-        <nav className="flex-1 space-y-2 font-bangla">
+        <nav className="flex-1 space-y-2 font-bangla overflow-y-auto pr-1">
           <NavItem active={currentView === 'home'} icon={LayoutDashboard} label="হোম পেজ" view="home" />
           <NavItem active={currentView === 'loans'} icon={HandCoins} label="বিনিয়োগ (লোন) প্রদান" view="loans" />
           <NavItem active={currentView === 'general_savings'} icon={PiggyBank} label="সাধারণ সঞ্চয় প্রদান" view="general_savings" />
