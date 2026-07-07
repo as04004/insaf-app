@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Plus, User } from 'lucide-react';
 import { 
   collection, 
@@ -9,6 +9,84 @@ import {
   serverTimestamp 
 } from 'firebase/firestore';
 import { db } from '../firebase';
+
+// --- Horizontal Scroll Hook ---
+const useHorizontalScroll = () => {
+  const elRef = useRef<HTMLDivElement>(null);
+  
+  useEffect(() => {
+    const el = elRef.current;
+    if (!el) return;
+
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY === 0) return;
+      
+      const canScrollLeft = el.scrollLeft > 0;
+      const canScrollRight = el.scrollLeft < (el.scrollWidth - el.clientWidth);
+      
+      if ((e.deltaY > 0 && canScrollRight) || (e.deltaY < 0 && canScrollLeft)) {
+        e.preventDefault();
+        el.scrollLeft += e.deltaY * 1.2;
+      }
+    };
+
+    let isDown = false;
+    let startX: number;
+    let scrollLeft: number;
+    let hasDragged = false;
+
+    const onMouseDown = (e: MouseEvent) => {
+      isDown = true;
+      startX = e.pageX - el.offsetLeft;
+      scrollLeft = el.scrollLeft;
+      hasDragged = false;
+    };
+
+    const onMouseLeave = () => {
+      isDown = false;
+    };
+
+    const onMouseUp = () => {
+      isDown = false;
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isDown) return;
+      const x = e.pageX - el.offsetLeft;
+      const walk = (x - startX) * 1.5;
+      if (Math.abs(walk) > 5) {
+        hasDragged = true;
+      }
+      el.scrollLeft = scrollLeft - walk;
+    };
+
+    const onClick = (e: MouseEvent) => {
+      if (hasDragged) {
+        e.preventDefault();
+        e.stopPropagation();
+        hasDragged = false;
+      }
+    };
+
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('mousedown', onMouseDown);
+    el.addEventListener('mouseleave', onMouseLeave);
+    el.addEventListener('mouseup', onMouseUp, true);
+    el.addEventListener('mousemove', onMouseMove);
+    el.addEventListener('click', onClick, true);
+
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('mousedown', onMouseDown);
+      el.removeEventListener('mouseleave', onMouseLeave);
+      el.removeEventListener('mouseup', onMouseUp, true);
+      el.removeEventListener('mousemove', onMouseMove);
+      el.removeEventListener('click', onClick, true);
+    };
+  }, []);
+
+  return elRef;
+};
 
 // --- Interfaces ---
 export interface Loan {
@@ -133,6 +211,7 @@ interface RiskyLoansManagementProps {
 }
 
 export const RiskyLoansManagement: React.FC<RiskyLoansManagementProps> = ({ riskyLoans, loans }) => {
+  const riskyLoansTableRef = useHorizontalScroll();
   const [customerName, setCustomerName] = useState('');
   const [accountNo, setAccountNo] = useState('');
   const [fatherName, setFatherName] = useState('');
@@ -445,7 +524,7 @@ export const RiskyLoansManagement: React.FC<RiskyLoansManagementProps> = ({ risk
           </div>
         </form>
       ) : (
-        <div className="overflow-x-auto w-full p-px">
+        <div ref={riskyLoansTableRef} className="overflow-x-auto w-full p-px cursor-grab active:cursor-grabbing desktop-scrollbar pb-2">
           <table className="min-w-[1000px] w-full border-collapse border border-gray-300 text-xs">
             <thead>
               <tr className="bg-gray-50 text-blue-900">
