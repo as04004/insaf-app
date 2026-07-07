@@ -628,6 +628,14 @@ const useHorizontalScroll = () => {
 export default function App() {
   const adminBtnsRef = useHorizontalScroll();
   const adminTabsRef = useHorizontalScroll();
+  const loansTableRef = useHorizontalScroll();
+  const generalSavingsTableRef = useHorizontalScroll();
+  const monthlySavingsTableRef = useHorizontalScroll();
+  const reportsTableRef = useHorizontalScroll();
+  const outstandingTableRef = useHorizontalScroll();
+  const outstandingMonthlyTableRef = useHorizontalScroll();
+  const officeRentsTableRef = useHorizontalScroll();
+  const landlordsTableRef = useHorizontalScroll();
   const [currentView, setCurrentView] = useState<View>('home');
   const [viewHistory, setViewHistory] = useState<View[]>(['home']);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -2784,8 +2792,8 @@ export default function App() {
 
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         {activeAdminTab === 'loans' && (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse border border-gray-300 text-xs">
+          <div ref={loansTableRef} className="overflow-x-auto cursor-grab active:cursor-grabbing desktop-scrollbar pb-2">
+            <table className="min-w-[800px] w-full border-collapse border border-gray-300 text-xs">
               <thead>
                 <tr className="bg-gray-50">
                   <th className="border border-gray-300 p-2">একাউন্ট নং</th>
@@ -2845,8 +2853,8 @@ export default function App() {
         )}
 
         {(activeAdminTab === 'general_savings' || activeAdminTab === 'monthly_savings') && (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse border border-gray-300 text-xs">
+          <div ref={activeAdminTab === 'general_savings' ? generalSavingsTableRef : monthlySavingsTableRef} className="overflow-x-auto cursor-grab active:cursor-grabbing desktop-scrollbar pb-2">
+            <table className="min-w-[700px] w-full border-collapse border border-gray-300 text-xs">
               <thead>
                 <tr className="bg-gray-50">
                   <th className="border border-gray-300 p-2">একাউন্ট নং</th>
@@ -2895,8 +2903,8 @@ export default function App() {
         )}
 
         {activeAdminTab === 'reports' && (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse border border-gray-300 text-xs">
+          <div ref={reportsTableRef} className="overflow-x-auto cursor-grab active:cursor-grabbing desktop-scrollbar pb-2">
+            <table className="min-w-[800px] w-full border-collapse border border-gray-300 text-xs">
               <thead>
                 <tr className="bg-gray-50">
                   <th className="border border-gray-300 p-2">মাস</th>
@@ -2965,8 +2973,8 @@ export default function App() {
         )}
 
         {activeAdminTab === 'outstanding' && (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse border border-gray-300 text-xs">
+          <div ref={outstandingTableRef} className="overflow-x-auto cursor-grab active:cursor-grabbing desktop-scrollbar pb-2">
+            <table className="min-w-[500px] w-full border-collapse border border-gray-300 text-xs">
               <thead>
                 <tr className="bg-gray-50">
                   <th className="border border-gray-300 p-2 text-center">পরিমাণ</th>
@@ -3009,8 +3017,8 @@ export default function App() {
         )}
 
         {activeAdminTab === 'outstanding_monthly' && (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse border border-gray-300 text-xs">
+          <div ref={outstandingMonthlyTableRef} className="overflow-x-auto cursor-grab active:cursor-grabbing desktop-scrollbar pb-2">
+            <table className="min-w-[550px] w-full border-collapse border border-gray-300 text-xs">
               <thead>
                 <tr className="bg-gray-50">
                   <th className="border border-gray-300 p-2">মাস</th>
@@ -3054,8 +3062,8 @@ export default function App() {
         )}
 
         {activeAdminTab === 'office_rents' && (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse border border-gray-300 text-xs">
+          <div ref={officeRentsTableRef} className="overflow-x-auto cursor-grab active:cursor-grabbing desktop-scrollbar pb-2">
+            <table className="min-w-[1000px] w-full border-collapse border border-gray-300 text-xs">
               <thead>
                 <tr className="bg-[#FCE4D6]">
                   <th className="border border-gray-400 p-2 text-blue-800 font-bold text-center">ক্রমিক</th>
@@ -3107,8 +3115,8 @@ export default function App() {
         )}
 
         {activeAdminTab === 'landlords' && (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse border border-gray-300 text-xs">
+          <div ref={landlordsTableRef} className="overflow-x-auto cursor-grab active:cursor-grabbing desktop-scrollbar pb-2">
+            <table className="min-w-[600px] w-full border-collapse border border-gray-300 text-xs">
               <thead>
                 <tr className="bg-gray-50">
                   <th className="border border-gray-300 p-2">নাম</th>
