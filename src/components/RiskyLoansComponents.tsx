@@ -445,8 +445,8 @@ export const RiskyLoansManagement: React.FC<RiskyLoansManagementProps> = ({ risk
           </div>
         </form>
       ) : (
-        <div className="overflow-x-auto w-full">
-          <table className="w-full border-collapse border border-gray-300 text-xs">
+        <div className="overflow-x-auto w-full p-px">
+          <table className="min-w-[1000px] w-full border-collapse border border-gray-300 text-xs">
             <thead>
               <tr className="bg-gray-50 text-blue-900">
                 <th className="border p-2 text-center whitespace-nowrap">ক্রমিক</th>
