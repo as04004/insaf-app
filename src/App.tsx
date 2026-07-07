@@ -1040,33 +1040,86 @@ export default function App() {
   const handlePasswordChange = async (newPassword: string) => {
     if (!newPassword) return;
     try {
-      await updateDoc(doc(db, 'settings', 'app_settings'), {
+      await setDoc(doc(db, 'settings', 'app_settings'), {
         admin_password: newPassword
-      });
+      }, { merge: true });
+      
+      const updatedSettings = { ...settings, admin_password: newPassword };
+      setSettings(updatedSettings);
+      localStorage.setItem('app_settings', JSON.stringify(updatedSettings));
+      
       alert('পাসওয়ার্ড সফলভাবে পরিবর্তন করা হয়েছে');
     } catch (error) {
       console.error("Error changing password:", error);
+      alert('পাসওয়ার্ড পরিবর্তন করতে সমস্যা হয়েছে');
     }
+  };
+
+  const compressLogo = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target?.result as string;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const max_size = 400; // maximum width/height for optimized rendering and storing
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > max_size) {
+              height = Math.round((height * max_size) / width);
+              width = max_size;
+            }
+          } else {
+            if (height > max_size) {
+              width = Math.round((width * max_size) / height);
+              height = max_size;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(event.target?.result as string);
+            return;
+          }
+
+          ctx.drawImage(img, 0, 0, width, height);
+          
+          // Export as PNG with alpha channel or JPEG to preserve small size
+          const compressed = canvas.toDataURL('image/png');
+          resolve(compressed);
+        };
+        img.onerror = (err) => reject(err);
+      };
+      reader.onerror = (err) => reject(err);
+    });
   };
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      const base64String = reader.result as string;
-      try {
-        await updateDoc(doc(db, 'settings', 'app_settings'), {
-          logo_url: base64String
-        });
-        alert('লোগো সফলভাবে আপলোড করা হয়েছে');
-      } catch (error) {
-        console.error("Error uploading logo:", error);
-        alert('লোগো আপলোড করতে সমস্যা হয়েছে সম্ভবত ফাইলের সাইজ অনেক বড়');
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressedBase64 = await compressLogo(file);
+      await setDoc(doc(db, 'settings', 'app_settings'), {
+        logo_url: compressedBase64
+      }, { merge: true });
+      
+      // Update local state and cache immediately for instantaneous feedback
+      const updatedSettings = { ...settings, logo_url: compressedBase64 };
+      setSettings(updatedSettings);
+      localStorage.setItem('app_settings', JSON.stringify(updatedSettings));
+      
+      alert('লোগো সফলভাবে আপলোড এবং সেভ করা হয়েছে');
+    } catch (error) {
+      console.error("Error uploading logo:", error);
+      alert('লোগো আপলোড করতে সমস্যা হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।');
+    }
   };
 
   const handleUpdateStatus = async (id: string, newStatus: string) => {
@@ -2015,7 +2068,7 @@ export default function App() {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto p-px">
           <table className="w-full border-collapse border border-gray-300 text-xs sm:text-sm">
             <thead>
               <tr className="bg-[#FCE4D6]">
@@ -3971,7 +4024,7 @@ export default function App() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={() => setIsMobileMenuOpen(false)}
-            className="md:hidden fixed inset-0 bg-black/20 backdrop-blur-sm z-40"
+            className="md:hidden fixed inset-0 bg-transparent z-40"
           />
         )}
       </AnimatePresence>
@@ -4035,7 +4088,7 @@ export default function App() {
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className="md:hidden fixed inset-0 top-[70px] bg-white z-40 p-6 flex flex-col gap-4 pt-4 pb-12 overflow-y-auto"
+            className="md:hidden fixed inset-x-0 bottom-0 top-[calc(4rem+env(safe-area-inset-top))] bg-white z-40 p-6 flex flex-col gap-4 pt-4 pb-safe overflow-y-auto"
           >
             <NavItem active={currentView === 'home'} icon={LayoutDashboard} label="হোম পেজ" view="home" />
             <NavItem active={currentView === 'loans'} icon={HandCoins} label="বিনিয়োগ (লোন) প্রদান" view="loans" />
@@ -4368,9 +4421,9 @@ const OfficeRentsView = ({ officeRents, landlords, societyInfo }: OfficeRentsVie
       {selectedDetailRent && (() => {
         const breakdown = getRentBreakdown(selectedDetailRent);
         return (
-          <div className="fixed inset-0 bg-white z-50 overflow-y-auto flex flex-col font-sans">
+          <div className="fixed inset-0 bg-white z-50 overflow-y-auto flex flex-col font-sans pb-safe">
             {/* Top Navigation Bar */}
-            <div className="bg-white border-b border-gray-200 sticky top-0 z-10 px-4 py-3 shadow-sm">
+            <div className="bg-white border-b border-gray-200 sticky top-0 z-10 px-4 py-3 shadow-sm pt-safe pl-safe pr-safe">
               <div className="w-full flex items-center">
                 <div className="flex items-center gap-2">
                   <button 
@@ -5214,9 +5267,9 @@ const OfficeRentReportView = ({ officeRents, landlords, societyInfo }: OfficeRen
 
       {/* Report Detail Modal */}
       {selectedReportDetail && (
-        <div className="fixed inset-0 bg-white z-50 overflow-y-auto flex flex-col font-sans text-gray-900">
+        <div className="fixed inset-0 bg-white z-50 overflow-y-auto flex flex-col font-sans text-gray-900 pb-safe">
           {/* Top Navigation Bar */}
-          <div className="bg-white border-b border-gray-200 sticky top-0 z-10 px-4 py-3 shadow-sm">
+          <div className="bg-white border-b border-gray-200 sticky top-0 z-10 px-4 py-3 shadow-sm pt-safe pl-safe pr-safe">
             <div className="w-full flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <button 
@@ -5484,67 +5537,68 @@ const RiskyInvestmentsView = ({ riskyLoans, riskyInstallments, societyInfo }: Ri
         </div>
       </div>
 
-      <div className="w-full max-h-[65vh] overflow-auto border border-gray-400 rounded-xl shadow-sm">
-        <table className="w-full border-collapse text-sm sm:text-base md:text-lg">
-          <thead>
-            <tr className="bg-[#FCE4D6] sticky top-0 z-10 shadow-[0_1px_0_rgba(0,0,0,0.1)]">
-              <th className="border border-gray-400 p-3 sm:p-4 text-blue-800 font-extrabold text-center whitespace-nowrap bg-[#FCE4D6] sticky top-0 z-10">ক্রমিক</th>
-              <th className="border border-gray-400 p-3 sm:p-4 text-blue-800 font-extrabold text-left whitespace-nowrap bg-[#FCE4D6] sticky top-0 z-10">গ্রাহকের নাম</th>
-              <th className="border border-gray-400 p-3 sm:p-4 text-blue-800 font-extrabold text-center whitespace-nowrap bg-[#FCE4D6] sticky top-0 z-10">হিসাব নাম্বার</th>
-              <th className="border border-gray-400 p-3 sm:p-4 text-blue-800 font-extrabold text-center whitespace-nowrap bg-[#FCE4D6] sticky top-0 z-10">বিনিয়োগের পরিমাণ</th>
-              <th className="border border-gray-400 p-3 sm:p-4 text-blue-800 font-extrabold text-center whitespace-nowrap bg-[#FCE4D6] sticky top-0 z-10">মোট পরিশোধিত</th>
-              <th className="border border-gray-400 p-3 sm:p-4 text-blue-800 font-extrabold text-center whitespace-nowrap bg-[#FCE4D6] sticky top-0 z-10">বকেয়া</th>
-              <th className="border border-gray-400 p-3 sm:p-4 text-blue-800 font-extrabold text-center whitespace-nowrap bg-[#FCE4D6] sticky top-0 z-10">সময় কাল</th>
-              <th className="border border-gray-400 p-3 sm:p-4 text-blue-800 font-extrabold text-center whitespace-nowrap bg-[#FCE4D6] sticky top-0 z-10">স্ট্যাটাস</th>
-              <th className="border border-gray-400 p-3 sm:p-4 text-blue-800 font-extrabold text-center whitespace-nowrap bg-[#FCE4D6] sticky top-0 z-10">একশন</th>
-            </tr>
-          </thead>
-          <tbody>
+      <div className="w-full overflow-x-auto px-1 pb-1 border-none shadow-none bg-transparent">
+        <div className="max-h-[65vh] overflow-y-auto border-none shadow-none bg-transparent">
+          <table className="min-w-[1100px] w-full border-collapse text-xs sm:text-sm">
+            <thead>
+              <tr className="bg-[#FCE4D6] sticky top-0 z-10 shadow-[0_1px_0_rgba(0,0,0,0.1)]">
+                <th className="border border-gray-400 py-1 px-1.5 text-blue-800 font-extrabold text-center whitespace-nowrap bg-[#FCE4D6] sticky top-0 z-10">ক্রমিক</th>
+                <th className="border border-gray-400 py-1 px-1.5 text-blue-800 font-extrabold text-left whitespace-nowrap bg-[#FCE4D6] sticky top-0 z-10">গ্রাহকের নাম</th>
+                <th className="border border-gray-400 py-1 px-1.5 text-blue-800 font-extrabold text-center whitespace-nowrap bg-[#FCE4D6] sticky top-0 z-10">হিসাব নাম্বার</th>
+                <th className="border border-gray-400 py-1 px-1.5 text-blue-800 font-extrabold text-center whitespace-nowrap bg-[#FCE4D6] sticky top-0 z-10">বিনিয়োগের পরিমাণ</th>
+                <th className="border border-gray-400 py-1 px-1.5 text-blue-800 font-extrabold text-center whitespace-nowrap bg-[#FCE4D6] sticky top-0 z-10">মোট পরিশোধিত</th>
+                <th className="border border-gray-400 py-1 px-1.5 text-blue-800 font-extrabold text-center whitespace-nowrap bg-[#FCE4D6] sticky top-0 z-10">বকেয়া</th>
+                <th className="border border-gray-400 py-1 px-1.5 text-blue-800 font-extrabold text-center whitespace-nowrap bg-[#FCE4D6] sticky top-0 z-10">সময় কাল</th>
+                <th className="border border-gray-400 py-1 px-1.5 text-blue-800 font-extrabold text-center whitespace-nowrap bg-[#FCE4D6] sticky top-0 z-10">স্ট্যাটাস</th>
+                <th className="border border-gray-400 py-1 px-1.5 text-blue-800 font-extrabold text-center whitespace-nowrap bg-[#FCE4D6] sticky top-0 z-10">একশন</th>
+              </tr>
+            </thead>
+            <tbody>
               {displayedLoans.map((loan, idx) => (
                 <tr key={loan.id} className="hover:bg-gray-50/70 transition-colors">
-                  <td className="border border-gray-300 p-3 sm:p-4 text-center whitespace-nowrap font-medium">
+                  <td className="border border-gray-300 py-1 px-1.5 text-center whitespace-nowrap font-medium">
                     {toBengaliNumber((currentPage - 1) * itemsPerPage + idx + 1)}
                   </td>
-                  <td className="border border-gray-300 p-3 sm:p-4 font-black text-left whitespace-nowrap">
+                  <td className="border border-gray-300 py-1 px-1.5 font-black text-left whitespace-nowrap">
                     {loan.customer_name}
                   </td>
-                  <td className="border border-gray-300 p-3 sm:p-4 text-center whitespace-nowrap font-bold">
+                  <td className="border border-gray-300 py-1 px-1.5 text-center whitespace-nowrap font-bold">
                     {toBengaliNumber(loan.account_no)}
                   </td>
-                  <td className="border border-gray-300 p-3 sm:p-4 text-center whitespace-nowrap font-bold text-indigo-700">
+                  <td className="border border-gray-300 py-1 px-1.5 text-center whitespace-nowrap font-bold text-indigo-700">
                     {formatCurrency(loan.amount)}
                   </td>
-                  <td className="border border-gray-300 p-3 sm:p-4 text-center whitespace-nowrap text-emerald-700 font-black">
+                  <td className="border border-gray-300 py-1 px-1.5 text-center whitespace-nowrap text-emerald-700 font-black">
                     {formatCurrency(loan.total_paid)}
                   </td>
-                  <td className="border border-gray-300 p-3 sm:p-4 text-center whitespace-nowrap text-red-600 font-black">
+                  <td className="border border-gray-300 py-1 px-1.5 text-center whitespace-nowrap text-red-600 font-black">
                     {formatCurrency(loan.total_due)}
                   </td>
-                  <td className="border border-gray-300 p-3 sm:p-4 text-center whitespace-nowrap text-gray-700 font-medium">
+                  <td className="border border-gray-300 py-1 px-1.5 text-center whitespace-nowrap text-gray-700 font-medium">
                     {loan.start_date && loan.end_date ? `${formatDate(loan.start_date)} হতে ${formatDate(loan.end_date)}` : '---'}
                   </td>
-                  <td className="border border-gray-300 p-3 sm:p-4 text-center whitespace-nowrap">
-                    <span className={`px-3 py-1 rounded-full text-xs sm:text-sm font-bold inline-block ${
+                  <td className="border border-gray-300 py-1 px-1.5 text-center whitespace-nowrap">
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-bold inline-block ${
                       loan.status === 'অনিয়মিত ঋণগ্রহীতা' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
                     }`}>
                       {loan.status}
                     </span>
                   </td>
-                  <td className="border border-gray-300 p-3 sm:p-4 text-center whitespace-nowrap">
-                    <div className="flex items-center justify-center gap-3">
+                  <td className="border border-gray-300 py-1 px-1.5 text-center whitespace-nowrap">
+                    <div className="flex items-center justify-center gap-2">
                       <button 
                         onClick={() => setSelectedTransactionRiskyLoan(loan)}
-                        className="p-2 hover:bg-indigo-50 hover:text-indigo-800 rounded-lg text-indigo-600 transition-colors"
+                        className="p-1 hover:bg-indigo-50 hover:text-indigo-800 rounded-lg text-indigo-600 transition-colors"
                         title="লেনদেন ইতিহাস"
                       >
-                        <History size={20} />
+                        <History size={16} />
                       </button>
                       <button 
                         onClick={() => setSelectedDetailRiskyLoan(loan)}
-                        className="p-2 hover:bg-emerald-50 hover:text-emerald-800 rounded-lg text-emerald-600 transition-colors"
+                        className="p-1 hover:bg-emerald-50 hover:text-emerald-800 rounded-lg text-emerald-600 transition-colors"
                         title="বিস্তারিত বিবরণ"
                       >
-                        <Eye size={20} />
+                        <Eye size={16} />
                       </button>
                     </div>
                   </td>
@@ -5552,13 +5606,14 @@ const RiskyInvestmentsView = ({ riskyLoans, riskyInstallments, societyInfo }: Ri
               ))}
               {displayedLoans.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="border border-gray-300 p-8 text-center text-gray-400 italic">
+                  <td colSpan={9} className="border border-gray-300 py-1 px-1.5 text-center text-gray-400 italic">
                     কোন ঝুঁকিপূর্ণ বিনিয়োগের তথ্য পাওয়া যায়নি
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+        </div>
       </div>
 
       {totalPages > 1 && (
@@ -5582,14 +5637,14 @@ const RiskyInvestmentsView = ({ riskyLoans, riskyInstallments, societyInfo }: Ri
       {/* Detail Modal */}
       <AnimatePresence>
         {selectedDetailRiskyLoan && (
-          <div className="fixed inset-0 bg-white z-[120] flex flex-col overflow-y-auto">
+          <div className="fixed inset-0 bg-white z-[120] flex flex-col overflow-y-auto pb-safe">
             <motion.div 
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 15 }}
               className="w-full min-h-screen bg-white font-sans text-gray-900 flex flex-col"
             >
-              <div className="p-4 sm:p-6 bg-red-600 flex items-center text-white sticky top-0 z-10 shadow-md">
+              <div className="p-4 sm:p-6 bg-red-600 flex items-center text-white sticky top-0 z-10 shadow-md pt-safe pl-safe pr-safe">
                 <div className="flex items-center gap-3">
                   <button onClick={closeDetail} className="hover:bg-white/20 p-1.5 rounded-lg transition-colors" title="পিছনে যান">
                     <ArrowLeft size={24} />
@@ -5715,14 +5770,14 @@ const RiskyInvestmentsView = ({ riskyLoans, riskyInstallments, societyInfo }: Ri
       {/* Transactions Modal */}
       <AnimatePresence>
         {selectedTransactionRiskyLoan && (
-          <div className="fixed inset-0 bg-white z-[120] flex flex-col overflow-y-auto">
+          <div className="fixed inset-0 bg-white z-[120] flex flex-col overflow-y-auto pb-safe">
             <motion.div 
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 15 }}
               className="w-full min-h-screen bg-white font-sans text-gray-900 flex flex-col"
             >
-              <div className="p-4 sm:p-6 bg-indigo-600 flex items-center text-white sticky top-0 z-10 shadow-md">
+              <div className="p-4 sm:p-6 bg-indigo-600 flex items-center text-white sticky top-0 z-10 shadow-md pt-safe pl-safe pr-safe">
                 <div className="flex items-center gap-3">
                   <button onClick={closeTransactions} className="hover:bg-white/20 p-1.5 rounded-lg transition-colors" title="পিছনে যান">
                     <ArrowLeft size={24} />
