@@ -146,6 +146,14 @@ const formatCurrency = (amount: number | string) => {
   return toBengaliNumber(formatted);
 };
 
+const formatDate = (dateStr: string) => {
+  if (!dateStr || !dateStr.includes('-')) return dateStr || '---';
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return dateStr;
+  const [year, month, day] = parts;
+  return toBengaliNumber(`${day}-${month}-${year}`);
+};
+
 const CurrencyInput = ({ 
   label, 
   name, 
@@ -352,6 +360,47 @@ export const RiskyLoansManagement: React.FC<RiskyLoansManagementProps> = ({ risk
     }
   };
 
+  const getTimestampMs = (val: any): number => {
+    if (!val) return 0;
+    if (typeof val.toDate === 'function') {
+      return val.toDate().getTime();
+    }
+    if (val.seconds !== undefined) {
+      return val.seconds * 1000 + (val.nanoseconds || 0) / 1000000;
+    }
+    if (val instanceof Date) {
+      return val.getTime();
+    }
+    if (typeof val === 'string') {
+      return new Date(val).getTime();
+    }
+    if (typeof val === 'number') {
+      return val;
+    }
+    return 0;
+  };
+
+  const sortedRiskyLoans = [...riskyLoans].sort((a, b) => {
+    const timeA = getTimestampMs(a.created_at);
+    const timeB = getTimestampMs(b.created_at);
+    
+    if (timeA && timeB) {
+      return timeB - timeA; // newest first
+    }
+    if (timeA) return -1;
+    if (timeB) return 1;
+
+    const startA = a.start_date || '';
+    const startB = b.start_date || '';
+    if (startA && startB) {
+      return startB.localeCompare(startA);
+    }
+    if (startA) return -1;
+    if (startB) return 1;
+
+    return (b.id || '').localeCompare(a.id || '');
+  });
+
   return (
     <div className="space-y-6 font-sans">
       <div className="flex justify-between items-center border-b pb-4">
@@ -535,12 +584,13 @@ export const RiskyLoansManagement: React.FC<RiskyLoansManagementProps> = ({ risk
                 <th className="border p-2 text-center whitespace-nowrap">মুনাফাসহ মোট</th>
                 <th className="border p-2 text-center whitespace-nowrap">মোট পরিশোধ</th>
                 <th className="border p-2 text-center whitespace-nowrap">মোট বকেয়া</th>
+                <th className="border p-2 text-center whitespace-nowrap">সময় কাল</th>
                 <th className="border p-2 text-center whitespace-nowrap">স্ট্যাটাস</th>
                 <th className="border p-2 text-center whitespace-nowrap">অ্যাকশন</th>
               </tr>
             </thead>
             <tbody>
-              {riskyLoans.map((l, idx) => (
+              {sortedRiskyLoans.map((l, idx) => (
                 <tr key={l.id} className="hover:bg-gray-50">
                   <td className="border p-2 text-center whitespace-nowrap">{toBengaliNumber(idx + 1)}</td>
                   <td className="border p-2 text-left font-bold whitespace-nowrap">{l.customer_name}</td>
@@ -549,6 +599,9 @@ export const RiskyLoansManagement: React.FC<RiskyLoansManagementProps> = ({ risk
                   <td className="border p-2 text-center whitespace-nowrap">{formatCurrency(l.total_with_profit)}</td>
                   <td className="border p-2 text-center whitespace-nowrap text-emerald-700 font-semibold">{formatCurrency(l.total_paid)}</td>
                   <td className="border p-2 text-center whitespace-nowrap text-red-600 font-semibold">{formatCurrency(l.total_due)}</td>
+                  <td className="border p-2 text-center whitespace-nowrap text-gray-700 font-medium">
+                    {l.start_date && l.end_date ? `${formatDate(l.start_date)} হতে ${formatDate(l.end_date)}` : '---'}
+                  </td>
                   <td className="border p-2 text-center whitespace-nowrap">
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                       l.status === 'অনিয়মিত ঋণগ্রহীতা' ? 'bg-amber-100 text-amber-700' : 
@@ -575,9 +628,9 @@ export const RiskyLoansManagement: React.FC<RiskyLoansManagementProps> = ({ risk
                   </td>
                 </tr>
               ))}
-              {riskyLoans.length === 0 && (
+              {sortedRiskyLoans.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="border p-8 text-center text-gray-400 italic">কোন ঝুঁকিপূর্ণ ঋণ হিসাব পাওয়া যায়নি</td>
+                  <td colSpan={10} className="border p-8 text-center text-gray-400 italic">কোন ঝুঁকিপূর্ণ ঋণ হিসাব পাওয়া যায়নি</td>
                 </tr>
               )}
             </tbody>
