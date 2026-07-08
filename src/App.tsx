@@ -5437,7 +5437,18 @@ const RiskyInvestmentsView = ({ riskyLoans, riskyInstallments, societyInfo }: Ri
   const [selectedTransactionRiskyLoan, setSelectedTransactionRiskyLoan] = useState<RiskyLoan | null>(null);
   const [detailImageError, setDetailImageError] = useState(false);
 
-  const activeRiskyLoans = riskyLoans.filter(l => l.total_due > 0 && l.status !== 'পরিশোধিত');
+  const activeRiskyLoans = [...riskyLoans]
+    .filter(l => l.total_due > 0 && l.status !== 'পরিশোধিত')
+    .sort((a, b) => {
+      const startA = a.start_date || '';
+      const startB = b.start_date || '';
+      if (startA && startB) {
+        return startA.localeCompare(startB);
+      }
+      if (startA) return -1;
+      if (startB) return 1;
+      return 0;
+    });
 
   const filteredLoans = activeRiskyLoans.filter(l => {
     const matchesFilter = filter === 'সকল' || l.status === filter;
@@ -5663,7 +5674,7 @@ const RiskyInvestmentsView = ({ riskyLoans, riskyInstallments, societyInfo }: Ri
                 </div>
               </div>
 
-              <div className="p-4 sm:p-8 max-w-2xl mx-auto w-full space-y-6 font-bangla pb-20">
+              <div className="p-4 sm:p-8 max-w-5xl mx-auto w-full space-y-6 font-bangla pb-20">
                 {/* Customer Photo Section */}
                 <div className="flex flex-col items-center text-center space-y-3 pb-5 border-b border-gray-100">
                   <div className="relative">
@@ -5797,7 +5808,7 @@ const RiskyInvestmentsView = ({ riskyLoans, riskyInstallments, societyInfo }: Ri
                 </div>
               </div>
 
-              <div className="p-4 sm:p-8 max-w-2xl mx-auto w-full space-y-8 font-bangla pb-20">
+              <div className="p-4 sm:p-8 max-w-5xl mx-auto w-full space-y-8 font-bangla pb-20">
                 {/* Table 1: Details Table */}
                 <div>
                   <h4 className="text-base sm:text-lg font-bold text-indigo-900 flex items-center gap-2 mb-3 pb-1 border-b border-indigo-100">
